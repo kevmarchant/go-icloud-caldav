@@ -20,7 +20,7 @@ func (c *CalDAVClient) FindCurrentUserPrincipal(ctx context.Context) (string, er
 	if err != nil {
 		return "", fmt.Errorf("executing propfind request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
@@ -54,7 +54,7 @@ func (c *CalDAVClient) FindCalendarHomeSet(ctx context.Context, principalPath st
 	if err != nil {
 		return "", fmt.Errorf("executing propfind request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
@@ -97,7 +97,7 @@ func (c *CalDAVClient) FindCalendars(ctx context.Context, calendarHomePath strin
 	if err != nil {
 		return nil, fmt.Errorf("executing propfind request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)

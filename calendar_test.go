@@ -35,7 +35,7 @@ func TestFindCurrentUserPrincipal(t *testing.T) {
 		}
 
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -77,7 +77,7 @@ func TestFindCalendarHomeSet(t *testing.T) {
 		}
 
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -144,7 +144,7 @@ func TestFindCalendars(t *testing.T) {
 		}
 
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -188,7 +188,7 @@ func TestDiscoverCalendars(t *testing.T) {
 				t.Errorf("first call: expected path /, got %s", r.URL.Path)
 			}
 			w.WriteHeader(207)
-			w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:">
 	<D:response>
 		<D:href>/</D:href>
@@ -208,7 +208,7 @@ func TestDiscoverCalendars(t *testing.T) {
 				t.Errorf("second call: expected path /123456/principal/, got %s", r.URL.Path)
 			}
 			w.WriteHeader(207)
-			w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
 	<D:response>
 		<D:href>/123456/principal/</D:href>
@@ -228,7 +228,7 @@ func TestDiscoverCalendars(t *testing.T) {
 				t.Errorf("third call: expected path /123456/calendars/, got %s", r.URL.Path)
 			}
 			w.WriteHeader(207)
-			w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
 	<D:response>
 		<D:href>/123456/calendars/home/</D:href>

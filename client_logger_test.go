@@ -35,7 +35,7 @@ func TestClientWithLogger(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(207)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/principal/</D:href>
@@ -66,7 +66,7 @@ func TestClientWithDebugLogging(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(207)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/principal/</D:href>
@@ -101,7 +101,7 @@ func TestClientWithDebugLoggingStdout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(207)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/principal/</D:href>
@@ -131,7 +131,7 @@ func TestClientLoggingOnError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
-		w.Write([]byte("Internal Server Error"))
+		_, _ = w.Write([]byte("Internal Server Error"))
 	}))
 	defer server.Close()
 

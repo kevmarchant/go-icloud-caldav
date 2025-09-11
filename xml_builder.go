@@ -122,7 +122,7 @@ func writeTimeRange(buf *bytes.Buffer, tr *TimeRange) {
 
 func xmlEscape(s string) string {
 	var buf bytes.Buffer
-	xml.EscapeText(&buf, []byte(s))
+	_ = xml.EscapeText(&buf, []byte(s))
 	return buf.String()
 }
 

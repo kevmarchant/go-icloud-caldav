@@ -41,7 +41,7 @@ END:VCALENDAR</C:calendar-data>
 		}
 
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -100,7 +100,7 @@ END:VCALENDAR</C:calendar-data>
 		}
 
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -144,7 +144,7 @@ END:VCALENDAR</C:calendar-data>
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -171,7 +171,7 @@ func TestGetEventByUIDNotFound(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -218,7 +218,7 @@ func TestCountEvents(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -258,7 +258,7 @@ END:VCALENDAR</C:calendar-data>
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 
@@ -304,7 +304,7 @@ END:VCALENDAR</C:calendar-data>
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
-		w.Write([]byte(responseXML))
+		_, _ = w.Write([]byte(responseXML))
 	}))
 	defer server.Close()
 

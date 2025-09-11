@@ -12,7 +12,7 @@ import (
 func BenchmarkHTTPClientDefault(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/test/</D:href>
@@ -37,7 +37,7 @@ func BenchmarkHTTPClientDefault(b *testing.B) {
 func BenchmarkHTTPClientOptimized(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/test/</D:href>
@@ -64,7 +64,7 @@ func BenchmarkHTTPClientConcurrent(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Millisecond)
 		w.WriteHeader(200)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/test/</D:href>
@@ -91,7 +91,7 @@ func BenchmarkHTTPClientConcurrent(b *testing.B) {
 func BenchmarkHTTPClientConnectionPooling(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/test/</D:href>
@@ -116,7 +116,7 @@ func BenchmarkHTTPClientConnectionPooling(b *testing.B) {
 func BenchmarkHTTPClientManyConnections(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 			<D:multistatus xmlns:D="DAV:">
 				<D:response>
 					<D:href>/test/</D:href>

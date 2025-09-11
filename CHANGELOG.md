@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-01-11
+
+### Fixed
+- CI/CD pipeline errors with golangci-lint (updated to v1.61.0 for Go 1.23 compatibility)
+- Unchecked error returns in defer statements and test files
+- Security scan permission issues in GitHub Actions workflow
+- Code formatting consistency across all test files
+
+### Changed
+- Added proper error handling for `resp.Body.Close()` in defer statements
+- Added error handling for `w.Write()` calls in test files
+- Added `security-events: write` permission for Trivy security scanner
+- Applied `go fmt` to ensure consistent formatting
+
+### Technical Details
+- Fixed 7 errcheck lint issues across multiple files
+- Updated `.github/workflows/ci.yml` with proper permissions
+- All CI/CD checks now passing
+
 ## [0.1.0] - 2025-01-11
 
 ### Initial Release
