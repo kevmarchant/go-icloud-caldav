@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockLogger struct {
@@ -294,5 +295,68 @@ func TestWithDebugLogging(t *testing.T) {
 
 	if _, ok := client.logger.(*standardLogger); !ok {
 		t.Errorf("WithDebugLogging() did not set standard logger")
+	}
+}
+
+func TestNoopLogger(t *testing.T) {
+	logger := &noopLogger{}
+
+	// These should not panic and should do nothing
+	logger.Debug("debug message")
+	logger.Info("info message")
+	logger.Warn("warn message")
+	logger.Error("error message")
+
+	// No way to assert output since it's a noop logger, but we're testing that it doesn't crash
+}
+
+func TestWithLoggerOptions(t *testing.T) {
+	mock := &mockLogger{}
+	connectionConfig := &ConnectionPoolConfig{
+		MaxIdleConns:        10,
+		MaxConnsPerHost:     5,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30,
+	}
+	retryConfig := &RetryConfig{
+		MaxRetries:      3,
+		InitialInterval: 100 * time.Millisecond,
+		MaxInterval:     1000 * time.Millisecond,
+		Multiplier:      2.0,
+		RetryOnStatus:   []int{500, 502, 503, 504},
+	}
+	metrics := &ConnectionMetrics{}
+
+	client := NewClientWithOptions(
+		"user",
+		"pass",
+		WithLogger(mock),
+		WithAutoParsing(),
+		WithAutoCorrectXML(),
+		WithStrictXMLValidation(),
+		WithXMLValidation(true, true),
+		WithConnectionPool(connectionConfig),
+		WithRetry(retryConfig),
+		WithConnectionMetrics(metrics),
+	)
+
+	if client.logger != mock {
+		t.Error("Logger was not set correctly")
+	}
+
+	if !client.autoParsing {
+		t.Error("Auto parsing was not enabled")
+	}
+
+	if !client.autoCorrectXML {
+		t.Error("Auto correct XML was not enabled")
+	}
+
+	if client.xmlValidator == nil {
+		t.Error("XML validator was not set")
+	}
+
+	if client.connectionMetrics == nil {
+		t.Error("Connection metrics was not set")
 	}
 }

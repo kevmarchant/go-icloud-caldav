@@ -174,6 +174,148 @@ func TestBuildCalendarQueryXML(t *testing.T) {
 				`<C:text-match collation="i;ascii-casemap" negate-condition="yes">meeting</C:text-match>`,
 			},
 		},
+		{
+			name: "query with VCALENDAR component filter - no double nesting",
+			query: CalendarQuery{
+				Properties: []string{"calendar-data"},
+				Filter: Filter{
+					Component: "VCALENDAR",
+					Props: []PropFilter{
+						{
+							Name: "PRODID",
+							TextMatch: &TextMatch{
+								Value: "//Apple Inc.//",
+							},
+						},
+					},
+				},
+			},
+			expected: []string{
+				`<C:filter>`,
+				`<C:comp-filter name="VCALENDAR">`,
+				`<C:prop-filter name="PRODID">`,
+				`<C:text-match>//Apple Inc.//</C:text-match>`,
+				`</C:prop-filter>`,
+				`</C:comp-filter>`,
+				`</C:filter>`,
+			},
+			notExpected: []string{
+				`<C:comp-filter name="VCALENDAR"><C:comp-filter name="VCALENDAR">`,
+			},
+		},
+		{
+			name: "query with VCALENDAR filter and time range",
+			query: CalendarQuery{
+				Properties: []string{"calendar-data"},
+				Filter: Filter{
+					Component: "VCALENDAR",
+					TimeRange: &TimeRange{
+						Start: startTime,
+						End:   endTime,
+					},
+				},
+			},
+			expected: []string{
+				`<C:filter>`,
+				`<C:comp-filter name="VCALENDAR">`,
+				`<C:time-range start="20250101T000000Z" end="20250131T235959Z"/>`,
+				`</C:comp-filter>`,
+				`</C:filter>`,
+			},
+			notExpected: []string{
+				`<C:comp-filter name="VCALENDAR"><C:comp-filter name="VCALENDAR">`,
+			},
+		},
+		{
+			name: "query with nested component filters",
+			query: CalendarQuery{
+				Properties: []string{"calendar-data"},
+				Filter: Filter{
+					Component: "VCALENDAR",
+					CompFilters: []Filter{
+						{
+							Component: "VEVENT",
+							Props: []PropFilter{
+								{
+									Name: "UID",
+									TextMatch: &TextMatch{
+										Value: "test-uid",
+									},
+								},
+							},
+						},
+						{
+							Component: "VTODO",
+							Props: []PropFilter{
+								{
+									Name: "STATUS",
+									TextMatch: &TextMatch{
+										Value: "COMPLETED",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: []string{
+				`<C:filter>`,
+				`<C:comp-filter name="VCALENDAR">`,
+				`<C:comp-filter name="VEVENT">`,
+				`<C:prop-filter name="UID">`,
+				`<C:text-match>test-uid</C:text-match>`,
+				`</C:prop-filter>`,
+				`</C:comp-filter>`,
+				`<C:comp-filter name="VTODO">`,
+				`<C:prop-filter name="STATUS">`,
+				`<C:text-match>COMPLETED</C:text-match>`,
+				`</C:prop-filter>`,
+				`</C:comp-filter>`,
+			},
+		},
+		{
+			name: "query with deeply nested filters",
+			query: CalendarQuery{
+				Properties: []string{"calendar-data"},
+				Filter: Filter{
+					Component: "VCALENDAR",
+					CompFilters: []Filter{
+						{
+							Component: "VEVENT",
+							TimeRange: &TimeRange{
+								Start: startTime,
+								End:   endTime,
+							},
+							CompFilters: []Filter{
+								{
+									Component: "VALARM",
+									Props: []PropFilter{
+										{
+											Name: "ACTION",
+											TextMatch: &TextMatch{
+												Value: "DISPLAY",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: []string{
+				`<C:filter>`,
+				`<C:comp-filter name="VCALENDAR">`,
+				`<C:comp-filter name="VEVENT">`,
+				`<C:time-range start="20250101T000000Z" end="20250131T235959Z"/>`,
+				`<C:comp-filter name="VALARM">`,
+				`<C:prop-filter name="ACTION">`,
+				`<C:text-match>DISPLAY</C:text-match>`,
+				`</C:prop-filter>`,
+				`</C:comp-filter>`,
+				`</C:comp-filter>`,
+			},
+		},
 	}
 
 	for _, tt := range tests {

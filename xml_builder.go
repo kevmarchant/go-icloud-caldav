@@ -64,41 +64,24 @@ func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
 	}
 	buf.WriteString(`</D:prop>`)
 
-	if query.Filter.Component != "" || query.TimeRange != nil {
+	if query.Filter.Component != "" || query.TimeRange != nil || len(query.Filter.CompFilters) > 0 {
 		buf.WriteString(`<C:filter>`)
 		buf.WriteString(`<C:comp-filter name="VCALENDAR">`)
 
-		if query.Filter.Component != "" {
-			buf.WriteString(fmt.Sprintf(`<C:comp-filter name="%s">`, query.Filter.Component))
-
-			for _, propFilter := range query.Filter.Props {
-				buf.WriteString(fmt.Sprintf(`<C:prop-filter name="%s">`, propFilter.Name))
-
-				if propFilter.TextMatch != nil {
-					negateAttr := ""
-					if propFilter.TextMatch.NegateCondition {
-						negateAttr = ` negate-condition="yes"`
-					}
-					collationAttr := ""
-					if propFilter.TextMatch.Collation != "" {
-						collationAttr = fmt.Sprintf(` collation="%s"`, propFilter.TextMatch.Collation)
-					}
-					buf.WriteString(fmt.Sprintf(`<C:text-match%s%s>%s</C:text-match>`,
-						collationAttr, negateAttr, xmlEscape(propFilter.TextMatch.Value)))
-				}
-
-				if propFilter.TimeRange != nil {
-					writeTimeRange(&buf, propFilter.TimeRange)
-				}
-
-				buf.WriteString(`</C:prop-filter>`)
-			}
-
+		if query.Filter.Component != "" && query.Filter.Component != "VCALENDAR" {
+			writeComponentFilter(&buf, query.Filter)
+		} else if query.Filter.Component == "VCALENDAR" {
+			writePropFilters(&buf, query.Filter.Props)
 			if query.Filter.TimeRange != nil {
 				writeTimeRange(&buf, query.Filter.TimeRange)
 			}
-
-			buf.WriteString(`</C:comp-filter>`)
+			for _, compFilter := range query.Filter.CompFilters {
+				writeComponentFilter(&buf, compFilter)
+			}
+		} else if len(query.Filter.CompFilters) > 0 {
+			for _, compFilter := range query.Filter.CompFilters {
+				writeComponentFilter(&buf, compFilter)
+			}
 		} else if query.TimeRange != nil {
 			buf.WriteString(`<C:comp-filter name="VEVENT">`)
 			writeTimeRange(&buf, query.TimeRange)
@@ -112,6 +95,47 @@ func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
 	buf.WriteString(`</C:calendar-query>`)
 
 	return buf.Bytes(), nil
+}
+
+func writeComponentFilter(buf *bytes.Buffer, filter Filter) {
+	fmt.Fprintf(buf, `<C:comp-filter name="%s">`, filter.Component)
+
+	writePropFilters(buf, filter.Props)
+
+	if filter.TimeRange != nil {
+		writeTimeRange(buf, filter.TimeRange)
+	}
+
+	for _, compFilter := range filter.CompFilters {
+		writeComponentFilter(buf, compFilter)
+	}
+
+	buf.WriteString(`</C:comp-filter>`)
+}
+
+func writePropFilters(buf *bytes.Buffer, props []PropFilter) {
+	for _, propFilter := range props {
+		fmt.Fprintf(buf, `<C:prop-filter name="%s">`, propFilter.Name)
+
+		if propFilter.TextMatch != nil {
+			negateAttr := ""
+			if propFilter.TextMatch.NegateCondition {
+				negateAttr = ` negate-condition="yes"`
+			}
+			collationAttr := ""
+			if propFilter.TextMatch.Collation != "" {
+				collationAttr = fmt.Sprintf(` collation="%s"`, propFilter.TextMatch.Collation)
+			}
+			fmt.Fprintf(buf, `<C:text-match%s%s>%s</C:text-match>`,
+				collationAttr, negateAttr, xmlEscape(propFilter.TextMatch.Value))
+		}
+
+		if propFilter.TimeRange != nil {
+			writeTimeRange(buf, propFilter.TimeRange)
+		}
+
+		buf.WriteString(`</C:prop-filter>`)
+	}
 }
 
 func writeTimeRange(buf *bytes.Buffer, tr *TimeRange) {

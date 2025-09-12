@@ -2,7 +2,6 @@ package caldav
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"time"
 )
@@ -13,26 +12,26 @@ import (
 func (c *CalDAVClient) QueryCalendar(ctx context.Context, calendarPath string, query CalendarQuery) ([]CalendarObject, error) {
 	xmlBody, err := buildCalendarQueryXML(query)
 	if err != nil {
-		return nil, fmt.Errorf("building calendar query XML: %w", err)
+		return nil, wrapErrorWithType("query.build", ErrorTypeInvalidRequest, err)
 	}
 
 	resp, err := c.report(ctx, calendarPath, xmlBody)
 	if err != nil {
-		return nil, fmt.Errorf("executing report request: %w", err)
+		return nil, wrapError("query.execute", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, body)
+		return nil, newCalDAVError("query", resp.StatusCode, string(body))
 	}
 
 	msResp, err := parseMultiStatusResponse(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("parsing multistatus response: %w", err)
+		return nil, wrapErrorWithType("query.parse", ErrorTypeInvalidResponse, err)
 	}
 
-	objects := extractCalendarObjectsFromResponse(msResp)
+	objects := extractCalendarObjectsFromResponseWithOptions(msResp, c.autoParsing)
 
 	return objects, nil
 }
@@ -93,7 +92,7 @@ func (c *CalDAVClient) GetEventByUID(ctx context.Context, calendarPath string, u
 	}
 
 	if len(objects) == 0 {
-		return nil, fmt.Errorf("event with UID %s not found", uid)
+		return nil, newTypedErrorWithContext("event.byuid", ErrorTypeNotFound, "event not found", ErrNotFound, map[string]interface{}{"uid": uid})
 	}
 
 	return &objects[0], nil

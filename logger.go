@@ -94,6 +94,72 @@ func WithHTTPClient(client *http.Client) ClientOption {
 	}
 }
 
+func WithXMLValidation(autoCorrect bool, strictMode bool) ClientOption {
+	return func(c *CalDAVClient) {
+		c.xmlValidator = NewXMLValidator(autoCorrect, strictMode)
+		c.autoCorrectXML = autoCorrect
+	}
+}
+
+func WithAutoCorrectXML() ClientOption {
+	return func(c *CalDAVClient) {
+		c.xmlValidator = NewXMLValidator(true, false)
+		c.autoCorrectXML = true
+	}
+}
+
+func WithStrictXMLValidation() ClientOption {
+	return func(c *CalDAVClient) {
+		c.xmlValidator = NewXMLValidator(false, true)
+		c.autoCorrectXML = false
+	}
+}
+
+func WithAutoParsing() ClientOption {
+	return func(c *CalDAVClient) {
+		c.autoParsing = true
+	}
+}
+
+func WithConnectionPool(config *ConnectionPoolConfig) ClientOption {
+	return func(c *CalDAVClient) {
+		transport := createTransport(config)
+		c.httpClient = &http.Client{
+			Transport: transport,
+			Timeout:   c.httpClient.Timeout,
+		}
+	}
+}
+
+func WithRetry(config *RetryConfig) ClientOption {
+	return func(c *CalDAVClient) {
+		if c.httpClient.Transport == nil {
+			c.httpClient.Transport = http.DefaultTransport
+		}
+
+		c.httpClient.Transport = &roundTripperWithRetry{
+			transport: c.httpClient.Transport,
+			config:    config,
+			logger:    c.logger,
+			metrics:   c.connectionMetrics,
+		}
+	}
+}
+
+func WithConnectionMetrics(metrics *ConnectionMetrics) ClientOption {
+	return func(c *CalDAVClient) {
+		c.connectionMetrics = metrics
+
+		if c.httpClient.Transport != nil {
+			c.httpClient.Transport = &instrumentedTransport{
+				transport: c.httpClient.Transport,
+				metrics:   metrics,
+				logger:    c.logger,
+			}
+		}
+	}
+}
+
 func (c *CalDAVClient) logRequest(req *http.Request) {
 	if c.debugHTTP && c.logger != nil {
 		if dump, err := httputil.DumpRequestOut(req, true); err == nil {

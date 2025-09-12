@@ -2,7 +2,6 @@ package caldav
 
 import (
 	"encoding/xml"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -34,6 +33,7 @@ type xmlPropData struct {
 	GetCTag                       string          `xml:"getctag,omitempty"`
 	GetETag                       string          `xml:"getetag,omitempty"`
 	CalendarData                  string          `xml:"calendar-data,omitempty"`
+	GetContentType                string          `xml:"getcontenttype,omitempty"`
 	CurrentUserPrincipal          xmlHref         `xml:"current-user-principal,omitempty"`
 	CalendarHomeSet               xmlHref         `xml:"calendar-home-set,omitempty"`
 	Owner                         xmlHref         `xml:"owner,omitempty"`
@@ -63,7 +63,7 @@ func parseMultiStatusResponse(body io.Reader) (*MultiStatusResponse, error) {
 	decoder := xml.NewDecoder(body)
 
 	if err := decoder.Decode(&ms); err != nil {
-		return nil, fmt.Errorf("decoding multistatus response: %w", err)
+		return nil, wrapErrorWithType("parse.multistatus", ErrorTypeInvalidResponse, err)
 	}
 
 	result := &MultiStatusResponse{
@@ -170,7 +170,13 @@ func extractCalendarsFromResponse(resp *MultiStatusResponse) []Calendar {
 	return calendars
 }
 
+// extractCalendarObjectsFromResponse extracts calendar objects from a multi-status response.
+// This function is exported for use in tests and benchmarks.
 func extractCalendarObjectsFromResponse(resp *MultiStatusResponse) []CalendarObject {
+	return extractCalendarObjectsFromResponseWithOptions(resp, false)
+}
+
+func extractCalendarObjectsFromResponseWithOptions(resp *MultiStatusResponse, autoParsing bool) []CalendarObject {
 	objects := make([]CalendarObject, 0)
 
 	for _, r := range resp.Responses {
@@ -184,6 +190,16 @@ func extractCalendarObjectsFromResponse(resp *MultiStatusResponse) []CalendarObj
 					}
 
 					parseCalendarData(&obj, ps.Prop.CalendarData)
+
+					if autoParsing && ps.Prop.CalendarData != "" {
+						parsedData, err := ParseICalendar(ps.Prop.CalendarData)
+						if err != nil {
+							obj.ParseError = err
+						} else {
+							obj.ParsedData = parsedData
+						}
+					}
+
 					objects = append(objects, obj)
 				} else if ps.Prop.ETag != "" {
 					obj := CalendarObject{

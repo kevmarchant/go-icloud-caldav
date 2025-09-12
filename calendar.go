@@ -2,7 +2,6 @@ package caldav
 
 import (
 	"context"
-	"fmt"
 	"io"
 )
 
@@ -13,28 +12,28 @@ func (c *CalDAVClient) FindCurrentUserPrincipal(ctx context.Context) (string, er
 	props := []string{"current-user-principal"}
 	xmlBody, err := buildPropfindXML(props)
 	if err != nil {
-		return "", fmt.Errorf("building propfind XML: %w", err)
+		return "", wrapErrorWithType("principal.build", ErrorTypeInvalidRequest, err)
 	}
 
 	resp, err := c.propfind(ctx, "/", "0", xmlBody)
 	if err != nil {
-		return "", fmt.Errorf("executing propfind request: %w", err)
+		return "", wrapError("principal.execute", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, body)
+		return "", newCalDAVError("principal", resp.StatusCode, string(body))
 	}
 
 	msResp, err := parseMultiStatusResponse(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("parsing multistatus response: %w", err)
+		return "", wrapErrorWithType("principal.parse", ErrorTypeInvalidResponse, err)
 	}
 
 	principal := extractPrincipalFromResponse(msResp)
 	if principal == "" {
-		return "", fmt.Errorf("no principal found in response")
+		return "", newTypedError("principal", ErrorTypeNotFound, "no principal found in response", ErrNotFound)
 	}
 
 	return principal, nil
@@ -47,28 +46,28 @@ func (c *CalDAVClient) FindCalendarHomeSet(ctx context.Context, principalPath st
 	props := []string{"calendar-home-set"}
 	xmlBody, err := buildPropfindXML(props)
 	if err != nil {
-		return "", fmt.Errorf("building propfind XML: %w", err)
+		return "", wrapErrorWithType("principal.build", ErrorTypeInvalidRequest, err)
 	}
 
 	resp, err := c.propfind(ctx, principalPath, "0", xmlBody)
 	if err != nil {
-		return "", fmt.Errorf("executing propfind request: %w", err)
+		return "", wrapError("principal.execute", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, body)
+		return "", newCalDAVError("principal", resp.StatusCode, string(body))
 	}
 
 	msResp, err := parseMultiStatusResponse(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("parsing multistatus response: %w", err)
+		return "", wrapErrorWithType("principal.parse", ErrorTypeInvalidResponse, err)
 	}
 
 	homeSet := extractCalendarHomeSetFromResponse(msResp)
 	if homeSet == "" {
-		return "", fmt.Errorf("no calendar home set found in response")
+		return "", newTypedError("calendar-home", ErrorTypeNotFound, "no calendar home set found in response", ErrNotFound)
 	}
 
 	return homeSet, nil
@@ -90,23 +89,23 @@ func (c *CalDAVClient) FindCalendars(ctx context.Context, calendarHomePath strin
 
 	xmlBody, err := buildPropfindXML(props)
 	if err != nil {
-		return nil, fmt.Errorf("building propfind XML: %w", err)
+		return nil, wrapErrorWithType("calendars.build", ErrorTypeInvalidRequest, err)
 	}
 
 	resp, err := c.propfind(ctx, calendarHomePath, "1", xmlBody)
 	if err != nil {
-		return nil, fmt.Errorf("executing propfind request: %w", err)
+		return nil, wrapError("calendars.execute", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 207 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, body)
+		return nil, newCalDAVError("calendars", resp.StatusCode, string(body))
 	}
 
 	msResp, err := parseMultiStatusResponse(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("parsing multistatus response: %w", err)
+		return nil, wrapErrorWithType("calendars.parse", ErrorTypeInvalidResponse, err)
 	}
 
 	calendars := extractCalendarsFromResponse(msResp)
@@ -121,17 +120,17 @@ func (c *CalDAVClient) FindCalendars(ctx context.Context, calendarHomePath strin
 func (c *CalDAVClient) DiscoverCalendars(ctx context.Context) ([]Calendar, error) {
 	principal, err := c.FindCurrentUserPrincipal(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("finding current user principal: %w", err)
+		return nil, wrapError("discover.principal", err)
 	}
 
 	homeSet, err := c.FindCalendarHomeSet(ctx, principal)
 	if err != nil {
-		return nil, fmt.Errorf("finding calendar home set: %w", err)
+		return nil, wrapError("discover.calendar-home", err)
 	}
 
 	calendars, err := c.FindCalendars(ctx, homeSet)
 	if err != nil {
-		return nil, fmt.Errorf("finding calendars: %w", err)
+		return nil, wrapError("discover.calendars", err)
 	}
 
 	return calendars, nil

@@ -18,13 +18,17 @@ const (
 // CalDAVClient provides access to iCloud CalDAV services.
 // It handles authentication and HTTP communication with the CalDAV server.
 type CalDAVClient struct {
-	httpClient *http.Client
-	baseURL    string
-	username   string
-	password   string
-	authHeader string
-	logger     Logger
-	debugHTTP  bool
+	httpClient        *http.Client
+	baseURL           string
+	username          string
+	password          string
+	authHeader        string
+	logger            Logger
+	debugHTTP         bool
+	xmlValidator      *XMLValidator
+	autoCorrectXML    bool
+	autoParsing       bool
+	connectionMetrics *ConnectionMetrics
 }
 
 // NewClient creates a new CalDAV client for iCloud.
@@ -62,6 +66,12 @@ func (c *CalDAVClient) SetTimeout(timeout time.Duration) {
 	c.httpClient.Timeout = timeout
 }
 
+// GetConnectionMetrics returns the current connection pool metrics.
+// Returns nil if metrics collection is not enabled.
+func (c *CalDAVClient) GetConnectionMetrics() *ConnectionMetrics {
+	return c.connectionMetrics
+}
+
 func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, body []byte) (*http.Response, error) {
 	var url string
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
@@ -72,10 +82,33 @@ func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, 
 
 	c.logger.Debug("PROPFIND %s (depth: %s)", url, depth)
 
+	if c.xmlValidator != nil {
+		result, err := c.xmlValidator.ValidateCalDAVRequest(body)
+		if err != nil {
+			c.logger.Error("XML validation error: %v", err)
+			if !c.autoCorrectXML {
+				return nil, newTypedError("validation", ErrorTypeValidation, "XML validation failed", err)
+			}
+		}
+
+		if !result.Valid {
+			if c.autoCorrectXML {
+				c.logger.Warn("XML validation failed, using auto-corrected XML")
+				body = result.Corrected
+			} else {
+				return nil, newTypedErrorWithContext("validation", ErrorTypeValidation, "XML validation failed", ErrInvalidXML, map[string]interface{}{"errors": result.Errors})
+			}
+		}
+
+		for _, warning := range result.Warnings {
+			c.logger.Warn("XML validation warning: %s", warning)
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "PROPFIND", url, bytes.NewReader(body))
 	if err != nil {
 		c.logger.Error("Failed to create PROPFIND request: %v", err)
-		return nil, fmt.Errorf("creating PROPFIND request: %w", err)
+		return nil, wrapErrorWithType("propfind.create", ErrorTypeInvalidRequest, err)
 	}
 
 	req.Header.Set("Authorization", c.authHeader)
@@ -88,7 +121,7 @@ func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.logger.Error("PROPFIND request failed: %v", err)
-		return nil, fmt.Errorf("executing PROPFIND request: %w", err)
+		return nil, wrapErrorWithType("propfind.execute", ErrorTypeNetwork, err)
 	}
 
 	c.logResponse(resp)
@@ -107,10 +140,33 @@ func (c *CalDAVClient) report(ctx context.Context, path string, body []byte) (*h
 
 	c.logger.Debug("REPORT %s", url)
 
+	if c.xmlValidator != nil {
+		result, err := c.xmlValidator.ValidateCalDAVRequest(body)
+		if err != nil {
+			c.logger.Error("XML validation error: %v", err)
+			if !c.autoCorrectXML {
+				return nil, newTypedError("validation", ErrorTypeValidation, "XML validation failed", err)
+			}
+		}
+
+		if !result.Valid {
+			if c.autoCorrectXML {
+				c.logger.Warn("XML validation failed, using auto-corrected XML")
+				body = result.Corrected
+			} else {
+				return nil, newTypedErrorWithContext("validation", ErrorTypeValidation, "XML validation failed", ErrInvalidXML, map[string]interface{}{"errors": result.Errors})
+			}
+		}
+
+		for _, warning := range result.Warnings {
+			c.logger.Warn("XML validation warning: %s", warning)
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "REPORT", url, bytes.NewReader(body))
 	if err != nil {
 		c.logger.Error("Failed to create REPORT request: %v", err)
-		return nil, fmt.Errorf("creating REPORT request: %w", err)
+		return nil, wrapErrorWithType("report.create", ErrorTypeInvalidRequest, err)
 	}
 
 	req.Header.Set("Authorization", c.authHeader)
@@ -123,7 +179,7 @@ func (c *CalDAVClient) report(ctx context.Context, path string, body []byte) (*h
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.logger.Error("REPORT request failed: %v", err)
-		return nil, fmt.Errorf("executing REPORT request: %w", err)
+		return nil, wrapErrorWithType("report.execute", ErrorTypeNetwork, err)
 	}
 
 	c.logResponse(resp)

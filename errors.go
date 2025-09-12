@@ -4,6 +4,31 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+)
+
+type ErrorType int
+
+const (
+	ErrorTypeUnknown ErrorType = iota
+	ErrorTypeAuthentication
+	ErrorTypeNotFound
+	ErrorTypePrecondition
+	ErrorTypeInvalidResponse
+	ErrorTypeTimeout
+	ErrorTypeCanceled
+	ErrorTypeInvalidXML
+	ErrorTypeNoCalendars
+	ErrorTypeInvalidTimeRange
+	ErrorTypeNetwork
+	ErrorTypeRateLimit
+	ErrorTypeServerError
+	ErrorTypeInvalidRequest
+	ErrorTypePermission
+	ErrorTypeConflict
+	ErrorTypeValidation
+	ErrorTypeClient
+	ErrorTypeServer
 )
 
 var (
@@ -16,13 +41,22 @@ var (
 	ErrInvalidXML         = errors.New("invalid XML")
 	ErrNoCalendars        = errors.New("no calendars found")
 	ErrInvalidTimeRange   = errors.New("invalid time range")
+	ErrNetwork            = errors.New("network error")
+	ErrRateLimit          = errors.New("rate limit exceeded")
+	ErrServerError        = errors.New("server error")
+	ErrInvalidRequest     = errors.New("invalid request")
+	ErrPermission         = errors.New("permission denied")
+	ErrConflict           = errors.New("resource conflict")
+	ErrValidation         = errors.New("validation failed")
 )
 
 type CalDAVError struct {
 	Op         string
+	Type       ErrorType
 	StatusCode int
 	Message    string
 	Err        error
+	Context    map[string]interface{}
 }
 
 func (e *CalDAVError) Error() string {
@@ -40,6 +74,9 @@ func (e *CalDAVError) Unwrap() error {
 }
 
 func (e *CalDAVError) IsTemporary() bool {
+	if e.Type == ErrorTypeTimeout || e.Type == ErrorTypeRateLimit {
+		return true
+	}
 	switch e.StatusCode {
 	case http.StatusTooManyRequests,
 		http.StatusServiceUnavailable,
@@ -54,25 +91,127 @@ func (e *CalDAVError) IsTemporary() bool {
 }
 
 func (e *CalDAVError) IsAuthError() bool {
+	if e.Type == ErrorTypeAuthentication || e.Type == ErrorTypePermission {
+		return true
+	}
 	return e.StatusCode == http.StatusUnauthorized ||
 		e.StatusCode == http.StatusForbidden ||
 		errors.Is(e.Err, ErrAuthentication)
 }
 
 func (e *CalDAVError) IsNotFound() bool {
+	if e.Type == ErrorTypeNotFound {
+		return true
+	}
 	return e.StatusCode == http.StatusNotFound ||
 		errors.Is(e.Err, ErrNotFound)
 }
 
+func (e *CalDAVError) IsNetworkError() bool {
+	return e.Type == ErrorTypeNetwork || errors.Is(e.Err, ErrNetwork)
+}
+
+func (e *CalDAVError) IsValidationError() bool {
+	return e.Type == ErrorTypeValidation ||
+		e.Type == ErrorTypeInvalidXML ||
+		e.Type == ErrorTypeInvalidTimeRange ||
+		e.Type == ErrorTypeInvalidRequest ||
+		errors.Is(e.Err, ErrValidation) ||
+		errors.Is(e.Err, ErrInvalidXML) ||
+		errors.Is(e.Err, ErrInvalidTimeRange)
+}
+
+func (e *CalDAVError) IsServerError() bool {
+	if e.Type == ErrorTypeServerError {
+		return true
+	}
+	return e.StatusCode >= 500 && e.StatusCode < 600
+}
+
+func (e *CalDAVError) IsClientError() bool {
+	if e.Type == ErrorTypeInvalidRequest || e.Type == ErrorTypePrecondition {
+		return true
+	}
+	return e.StatusCode >= 400 && e.StatusCode < 500
+}
+
 func newCalDAVError(op string, statusCode int, message string) *CalDAVError {
+	var errorType ErrorType
+	switch statusCode {
+	case http.StatusUnauthorized:
+		errorType = ErrorTypeAuthentication
+	case http.StatusForbidden:
+		errorType = ErrorTypePermission
+	case http.StatusNotFound:
+		errorType = ErrorTypeNotFound
+	case http.StatusPreconditionFailed:
+		errorType = ErrorTypePrecondition
+	case http.StatusTooManyRequests:
+		errorType = ErrorTypeRateLimit
+	case http.StatusRequestTimeout:
+		errorType = ErrorTypeTimeout
+	case http.StatusBadGateway:
+		errorType = ErrorTypeServerError
+	case http.StatusGatewayTimeout:
+		errorType = ErrorTypeTimeout
+	case http.StatusConflict:
+		errorType = ErrorTypeConflict
+	case 418: // I'm a teapot
+		errorType = ErrorTypeUnknown
+	default:
+		if statusCode >= 500 {
+			errorType = ErrorTypeServerError
+		} else if statusCode >= 400 {
+			errorType = ErrorTypeInvalidRequest
+		} else {
+			errorType = ErrorTypeUnknown
+		}
+	}
+
+	// Normalize message to lowercase for consistency
+	normalizedMessage := strings.ToLower(message)
+	if statusCode == 418 && !strings.Contains(normalizedMessage, "status") {
+		normalizedMessage = fmt.Sprintf("status %d: %s", statusCode, normalizedMessage)
+	}
+
+	// Truncate long messages
+	const maxMessageLength = 250
+	if len(normalizedMessage) > maxMessageLength {
+		normalizedMessage = normalizedMessage[:maxMessageLength] + "..."
+	}
+
 	return &CalDAVError{
 		Op:         op,
+		Type:       errorType,
 		StatusCode: statusCode,
-		Message:    message,
+		Message:    normalizedMessage,
+	}
+}
+
+func newTypedError(op string, errorType ErrorType, message string, err error) *CalDAVError {
+	return &CalDAVError{
+		Op:      op,
+		Type:    errorType,
+		Message: message,
+		Err:     err,
+	}
+}
+
+func newTypedErrorWithContext(op string, errorType ErrorType, message string, err error, context map[string]interface{}) *CalDAVError {
+	return &CalDAVError{
+		Op:      op,
+		Type:    errorType,
+		Message: message,
+		Err:     err,
+		Context: context,
 	}
 }
 
 func wrapError(op string, err error) *CalDAVError {
+	return wrapErrorWithType(op, ErrorTypeUnknown, err)
+}
+
+func wrapErrorWithType(op string, errorType ErrorType, err error) *CalDAVError {
 	if err == nil {
 		return nil
 	}
@@ -82,10 +221,54 @@ func wrapError(op string, err error) *CalDAVError {
 		return calErr
 	}
 
+	if errorType == ErrorTypeUnknown {
+		errorType = inferErrorType(err)
+	}
+
 	return &CalDAVError{
 		Op:      op,
+		Type:    errorType,
 		Message: "operation failed",
 		Err:     err,
+	}
+}
+
+func inferErrorType(err error) ErrorType {
+	switch {
+	case errors.Is(err, ErrAuthentication):
+		return ErrorTypeAuthentication
+	case errors.Is(err, ErrNotFound):
+		return ErrorTypeNotFound
+	case errors.Is(err, ErrPreconditionFailed):
+		return ErrorTypePrecondition
+	case errors.Is(err, ErrInvalidResponse):
+		return ErrorTypeInvalidResponse
+	case errors.Is(err, ErrTimeout):
+		return ErrorTypeTimeout
+	case errors.Is(err, ErrCanceled):
+		return ErrorTypeCanceled
+	case errors.Is(err, ErrInvalidXML):
+		return ErrorTypeInvalidXML
+	case errors.Is(err, ErrNoCalendars):
+		return ErrorTypeNoCalendars
+	case errors.Is(err, ErrInvalidTimeRange):
+		return ErrorTypeInvalidTimeRange
+	case errors.Is(err, ErrNetwork):
+		return ErrorTypeNetwork
+	case errors.Is(err, ErrRateLimit):
+		return ErrorTypeRateLimit
+	case errors.Is(err, ErrServerError):
+		return ErrorTypeServerError
+	case errors.Is(err, ErrInvalidRequest):
+		return ErrorTypeInvalidRequest
+	case errors.Is(err, ErrPermission):
+		return ErrorTypePermission
+	case errors.Is(err, ErrConflict):
+		return ErrorTypeConflict
+	case errors.Is(err, ErrValidation):
+		return ErrorTypeValidation
+	default:
+		return ErrorTypeUnknown
 	}
 }
 
@@ -113,4 +296,89 @@ func (e *MultiStatusError) HasErrors() bool {
 
 func (e *MultiStatusError) AllFailed() bool {
 	return e.SuccessCount == 0 && len(e.Errors) > 0
+}
+
+func IsAuthError(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsAuthError()
+	}
+	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrPermission)
+}
+
+func IsNotFound(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsNotFound()
+	}
+	return errors.Is(err, ErrNotFound)
+}
+
+func IsTemporary(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsTemporary()
+	}
+	return errors.Is(err, ErrTimeout) || errors.Is(err, ErrRateLimit)
+}
+
+func IsNetworkError(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsNetworkError()
+	}
+	return errors.Is(err, ErrNetwork)
+}
+
+func IsValidationError(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsValidationError()
+	}
+	return errors.Is(err, ErrValidation) ||
+		errors.Is(err, ErrInvalidXML) ||
+		errors.Is(err, ErrInvalidTimeRange) ||
+		errors.Is(err, ErrInvalidRequest)
+}
+
+func IsServerError(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsServerError()
+	}
+	return errors.Is(err, ErrServerError)
+}
+
+func IsClientError(err error) bool {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.IsClientError()
+	}
+	return errors.Is(err, ErrInvalidRequest) ||
+		errors.Is(err, ErrPreconditionFailed) ||
+		errors.Is(err, ErrValidation)
+}
+
+func GetErrorType(err error) ErrorType {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.Type
+	}
+	return inferErrorType(err)
+}
+
+func GetStatusCode(err error) int {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.StatusCode
+	}
+	return 0
+}
+
+func GetErrorContext(err error) map[string]interface{} {
+	var calErr *CalDAVError
+	if errors.As(err, &calErr) {
+		return calErr.Context
+	}
+	return nil
 }

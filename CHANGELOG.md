@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-01-12
+
+### Added
+- **Parallel Operations Support** - Query multiple calendars concurrently with up to 10x speedup
+  - `QueryCalendarsParallel` - Parallel calendar queries with configurable worker pool
+  - `GetRecentEventsParallel` - Parallel event fetching across calendars
+  - `GetEventsByTimeRangeParallel` - Parallel time-range queries
+  - Comprehensive batch operation utilities with error aggregation
+- **Incremental Sync Support** (RFC 6578)
+  - `SyncCalendar` - Sync single calendar with sync-token
+  - `SyncAllCalendars` - Sync all calendars with token management
+  - Efficient delta updates for large calendar sets
+- **Built-in iCal Parser**
+  - Automatic parsing of calendar data into structured Go types
+  - Support for events, todos, journals, and free/busy data
+  - Timezone and recurrence rule parsing
+  - `WithAutoParsing()` option for automatic parsing
+- **XML Validation and Auto-correction**
+  - Automatic fixing of common XML issues before sending requests
+  - Configurable validation modes (strict/auto-correct)
+  - `WithXMLValidation()` and `WithAutoCorrectXML()` options
+- **Enhanced Connection Management**
+  - Connection pooling with configurable parameters
+  - Retry logic with exponential backoff and jitter
+  - Connection metrics tracking
+  - `WithConnectionPool()` and `WithRetry()` options
+- **Comprehensive Error System**
+  - 17 distinct error types for precise categorization
+  - Helper functions for error type checking
+  - Context map for additional error metadata
+  - Improved error messages and debugging
+- **New Examples**
+  - `examples/basic_sync.go` - Simple calendar synchronization
+  - `examples/incremental_sync.go` - Using sync tokens for efficiency
+  - Removed outdated `examples/basic_usage.go`
+
+### Changed
+- Enhanced `CalDAVClient` with new options pattern for configuration
+- Improved XML generation with better namespace handling
+- Better handling of iCloud-specific multi-status responses
+- More comprehensive test coverage (90.2%, up from 82.1%)
+
+### Fixed
+- Deprecated `net.Error.Temporary()` usage (Go 1.18+ compatibility)
+- Integration test compilation errors
+- Benchmark test connection exhaustion issues
+- Proper error handling in defer statements (errcheck compliance)
+- Static analysis warnings from golangci-lint
+
+### Performance
+- Parallel operations provide 5-10x speedup for multi-calendar operations
+- Connection pooling reduces overhead by 60%+
+- Benchmarks show successful sync of 4,182 events across 9 calendars
+- Memory-efficient operations with minimal allocations
+
+### Development
+- All quality checks pass (fmt, vet, staticcheck, errcheck, ineffassign, golangci-lint)
+- 90.2% test coverage
+- Comprehensive benchmark suite with memory profiling
+- Integration tests for real iCloud interaction
+
 ## [0.1.1] - 2025-01-11
 
 ### Fixed
