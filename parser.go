@@ -25,19 +25,33 @@ type xmlPropstat struct {
 }
 
 type xmlPropData struct {
-	DisplayName                   string          `xml:"displayname,omitempty"`
-	ResourceType                  xmlResourceType `xml:"resourcetype,omitempty"`
-	CalendarDescription           string          `xml:"calendar-description,omitempty"`
-	CalendarColor                 string          `xml:"calendar-color,omitempty"`
-	CalendarOrder                 string          `xml:"calendar-order,omitempty"`
-	GetCTag                       string          `xml:"getctag,omitempty"`
-	GetETag                       string          `xml:"getetag,omitempty"`
-	CalendarData                  string          `xml:"calendar-data,omitempty"`
-	GetContentType                string          `xml:"getcontenttype,omitempty"`
-	CurrentUserPrincipal          xmlHref         `xml:"current-user-principal,omitempty"`
-	CalendarHomeSet               xmlHref         `xml:"calendar-home-set,omitempty"`
-	Owner                         xmlHref         `xml:"owner,omitempty"`
-	SupportedCalendarComponentSet xmlComponentSet `xml:"supported-calendar-component-set,omitempty"`
+	DisplayName                   string                `xml:"displayname,omitempty"`
+	ResourceType                  xmlResourceType       `xml:"resourcetype,omitempty"`
+	CalendarDescription           string                `xml:"calendar-description,omitempty"`
+	CalendarColor                 string                `xml:"calendar-color,omitempty"`
+	CalendarOrder                 string                `xml:"calendar-order,omitempty"`
+	GetCTag                       string                `xml:"getctag,omitempty"`
+	GetETag                       string                `xml:"getetag,omitempty"`
+	CalendarData                  string                `xml:"calendar-data,omitempty"`
+	GetContentType                string                `xml:"getcontenttype,omitempty"`
+	CurrentUserPrincipal          xmlHref               `xml:"current-user-principal,omitempty"`
+	CalendarHomeSet               xmlHref               `xml:"calendar-home-set,omitempty"`
+	Owner                         xmlHref               `xml:"owner,omitempty"`
+	SupportedCalendarComponentSet xmlComponentSet       `xml:"supported-calendar-component-set,omitempty"`
+	CalendarTimeZone              string                `xml:"calendar-timezone,omitempty"`
+	MaxResourceSize               string                `xml:"max-resource-size,omitempty"`
+	MinDateTime                   string                `xml:"min-date-time,omitempty"`
+	MaxDateTime                   string                `xml:"max-date-time,omitempty"`
+	MaxInstances                  string                `xml:"max-instances,omitempty"`
+	MaxAttendeesPerInstance       string                `xml:"max-attendees-per-instance,omitempty"`
+	CurrentUserPrivilegeSet       xmlPrivilegeSet       `xml:"current-user-privilege-set,omitempty"`
+	Source                        xmlHref               `xml:"source,omitempty"`
+	SupportedReportSet            xmlSupportedReportSet `xml:"supported-report-set,omitempty"`
+	QuotaUsedBytes                string                `xml:"quota-used-bytes,omitempty"`
+	QuotaAvailableBytes           string                `xml:"quota-available-bytes,omitempty"`
+	GetContentLength              string                `xml:"getcontentlength,omitempty"`
+	CreationDate                  string                `xml:"creationdate,omitempty"`
+	GetLastModified               string                `xml:"getlastmodified,omitempty"`
 }
 
 type xmlResourceType struct {
@@ -56,6 +70,42 @@ type xmlComponentSet struct {
 
 type xmlComp struct {
 	Name string `xml:"name,attr"`
+}
+
+type xmlPrivilegeSet struct {
+	Privileges []xmlPrivilege `xml:"privilege"`
+}
+
+type xmlPrivilege struct {
+	Read                        *struct{} `xml:"read,omitempty"`
+	Write                       *struct{} `xml:"write,omitempty"`
+	WriteProperties             *struct{} `xml:"write-properties,omitempty"`
+	WriteContent                *struct{} `xml:"write-content,omitempty"`
+	ReadCurrentUserPrivilegeSet *struct{} `xml:"read-current-user-privilege-set,omitempty"`
+	ReadACL                     *struct{} `xml:"read-acl,omitempty"`
+	WriteACL                    *struct{} `xml:"write-acl,omitempty"`
+	All                         *struct{} `xml:"all,omitempty"`
+	CalendarAccess              *struct{} `xml:"calendar-access,omitempty"`
+	ReadFreeBusy                *struct{} `xml:"read-free-busy,omitempty"`
+	ScheduleInbox               *struct{} `xml:"schedule-inbox,omitempty"`
+	ScheduleOutbox              *struct{} `xml:"schedule-outbox,omitempty"`
+	ScheduleSend                *struct{} `xml:"schedule-send,omitempty"`
+	ScheduleDeliver             *struct{} `xml:"schedule-deliver,omitempty"`
+}
+
+type xmlSupportedReportSet struct {
+	SupportedReports []xmlSupportedReport `xml:"supported-report"`
+}
+
+type xmlSupportedReport struct {
+	Report xmlReport `xml:"report"`
+}
+
+type xmlReport struct {
+	CalendarMultiget *struct{} `xml:"calendar-multiget,omitempty"`
+	CalendarQuery    *struct{} `xml:"calendar-query,omitempty"`
+	FreeBusyQuery    *struct{} `xml:"free-busy-query,omitempty"`
+	SyncCollection   *struct{} `xml:"sync-collection,omitempty"`
 }
 
 func parseMultiStatusResponse(body io.Reader) (*MultiStatusResponse, error) {
@@ -105,6 +155,10 @@ func parseStatusCode(status string) int {
 	return code
 }
 
+func parseDateTime(dateStr string) (time.Time, error) {
+	return ParseCalDAVTime(dateStr)
+}
+
 func convertPropData(xmlProp xmlPropData) PropstatProp {
 	prop := PropstatProp{
 		DisplayName:          xmlProp.DisplayName,
@@ -116,8 +170,40 @@ func convertPropData(xmlProp xmlPropData) PropstatProp {
 		CurrentUserPrincipal: xmlProp.CurrentUserPrincipal.Href,
 		CalendarHomeSet:      xmlProp.CalendarHomeSet.Href,
 		Owner:                xmlProp.Owner.Href,
+		CalendarTimeZone:     xmlProp.CalendarTimeZone,
+		MinDateTime:          xmlProp.MinDateTime,
+		MaxDateTime:          xmlProp.MaxDateTime,
+		Source:               xmlProp.Source.Href,
 	}
 
+	// Parse numeric fields
+	if xmlProp.MaxResourceSize != "" {
+		if size, err := strconv.ParseInt(xmlProp.MaxResourceSize, 10, 64); err == nil {
+			prop.MaxResourceSize = size
+		}
+	}
+	if xmlProp.MaxInstances != "" {
+		if instances, err := strconv.Atoi(xmlProp.MaxInstances); err == nil {
+			prop.MaxInstances = instances
+		}
+	}
+	if xmlProp.MaxAttendeesPerInstance != "" {
+		if attendees, err := strconv.Atoi(xmlProp.MaxAttendeesPerInstance); err == nil {
+			prop.MaxAttendeesPerInstance = attendees
+		}
+	}
+	if xmlProp.QuotaUsedBytes != "" {
+		if quota, err := strconv.ParseInt(xmlProp.QuotaUsedBytes, 10, 64); err == nil {
+			prop.QuotaUsedBytes = quota
+		}
+	}
+	if xmlProp.QuotaAvailableBytes != "" {
+		if quota, err := strconv.ParseInt(xmlProp.QuotaAvailableBytes, 10, 64); err == nil {
+			prop.QuotaAvailableBytes = quota
+		}
+	}
+
+	// Parse resource types
 	if xmlProp.ResourceType.Collection != nil {
 		prop.ResourceType = append(prop.ResourceType, "collection")
 	}
@@ -128,8 +214,82 @@ func convertPropData(xmlProp xmlPropData) PropstatProp {
 		prop.ResourceType = append(prop.ResourceType, "principal")
 	}
 
+	// Parse supported components
 	for _, comp := range xmlProp.SupportedCalendarComponentSet.Comps {
 		prop.SupportedCalendarComponentSet = append(prop.SupportedCalendarComponentSet, comp.Name)
+	}
+
+	// Parse current user privilege set
+	for _, priv := range xmlProp.CurrentUserPrivilegeSet.Privileges {
+		if priv.Read != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read")
+		}
+		if priv.Write != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write")
+		}
+		if priv.WriteProperties != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-properties")
+		}
+		if priv.WriteContent != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-content")
+		}
+		if priv.ReadCurrentUserPrivilegeSet != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-current-user-privilege-set")
+		}
+		if priv.ReadACL != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-acl")
+		}
+		if priv.WriteACL != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-acl")
+		}
+		if priv.All != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "all")
+		}
+		if priv.CalendarAccess != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "calendar-access")
+		}
+		if priv.ReadFreeBusy != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-free-busy")
+		}
+		if priv.ScheduleInbox != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-inbox")
+		}
+		if priv.ScheduleOutbox != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-outbox")
+		}
+		if priv.ScheduleSend != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-send")
+		}
+		if priv.ScheduleDeliver != nil {
+			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-deliver")
+		}
+	}
+
+	// Parse supported reports
+	for _, report := range xmlProp.SupportedReportSet.SupportedReports {
+		if report.Report.CalendarMultiget != nil {
+			prop.SupportedReports = append(prop.SupportedReports, "calendar-multiget")
+		}
+		if report.Report.CalendarQuery != nil {
+			prop.SupportedReports = append(prop.SupportedReports, "calendar-query")
+		}
+		if report.Report.FreeBusyQuery != nil {
+			prop.SupportedReports = append(prop.SupportedReports, "free-busy-query")
+		}
+		if report.Report.SyncCollection != nil {
+			prop.SupportedReports = append(prop.SupportedReports, "sync-collection")
+		}
+	}
+
+	// Parse attachment-related properties
+	prop.ContentType = xmlProp.GetContentType
+	prop.CreationDate = xmlProp.CreationDate
+	prop.LastModified = xmlProp.GetLastModified
+
+	if xmlProp.GetContentLength != "" {
+		if length, err := strconv.ParseInt(xmlProp.GetContentLength, 10, 64); err == nil {
+			prop.ContentLength = length
+		}
 	}
 
 	return prop
@@ -151,16 +311,40 @@ func extractCalendarsFromResponse(resp *MultiStatusResponse) []Calendar {
 
 				if isCalendar {
 					cal := Calendar{
-						Href:                r.Href,
-						Name:                extractNameFromHref(r.Href),
-						DisplayName:         ps.Prop.DisplayName,
-						Description:         ps.Prop.CalendarDescription,
-						Color:               ps.Prop.CalendarColor,
-						ResourceType:        ps.Prop.ResourceType,
-						SupportedComponents: ps.Prop.SupportedCalendarComponentSet,
-						CTag:                ps.Prop.CTag,
-						ETag:                ps.Prop.ETag,
+						Href:                    r.Href,
+						Name:                    extractNameFromHref(r.Href),
+						DisplayName:             ps.Prop.DisplayName,
+						Description:             ps.Prop.CalendarDescription,
+						Color:                   ps.Prop.CalendarColor,
+						ResourceType:            ps.Prop.ResourceType,
+						SupportedComponents:     ps.Prop.SupportedCalendarComponentSet,
+						CTag:                    ps.Prop.CTag,
+						ETag:                    ps.Prop.ETag,
+						CalendarTimeZone:        ps.Prop.CalendarTimeZone,
+						MaxResourceSize:         ps.Prop.MaxResourceSize,
+						MaxInstances:            ps.Prop.MaxInstances,
+						MaxAttendeesPerInstance: ps.Prop.MaxAttendeesPerInstance,
+						CurrentUserPrivilegeSet: ps.Prop.CurrentUserPrivilegeSet,
+						Source:                  ps.Prop.Source,
+						SupportedReports:        ps.Prop.SupportedReports,
+						Quota: CalendarQuota{
+							QuotaUsedBytes:      ps.Prop.QuotaUsedBytes,
+							QuotaAvailableBytes: ps.Prop.QuotaAvailableBytes,
+						},
 					}
+
+					// Parse min and max date times if present
+					if ps.Prop.MinDateTime != "" {
+						if minDt, err := parseDateTime(ps.Prop.MinDateTime); err == nil {
+							cal.MinDateTime = &minDt
+						}
+					}
+					if ps.Prop.MaxDateTime != "" {
+						if maxDt, err := parseDateTime(ps.Prop.MaxDateTime); err == nil {
+							cal.MaxDateTime = &maxDt
+						}
+					}
+
 					calendars = append(calendars, cal)
 				}
 			}
@@ -259,26 +443,7 @@ func parseCalendarData(obj *CalendarObject, data string) {
 }
 
 func parseICalTime(line string) *time.Time {
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) != 2 {
-		return nil
-	}
-
-	timeStr := parts[1]
-
-	formats := []string{
-		"20060102T150405Z",
-		"20060102T150405",
-		"20060102",
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, timeStr); err == nil {
-			return &t
-		}
-	}
-
-	return nil
+	return ParseICalPropertyTime(line)
 }
 
 func extractNameFromHref(href string) string {

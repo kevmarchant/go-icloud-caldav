@@ -14,7 +14,6 @@ func ParseICalendar(data string) (*ParsedCalendarData, error) {
 		result: &ParsedCalendarData{
 			Events:           make([]ParsedEvent, 0),
 			Todos:            make([]ParsedTodo, 0),
-			Journals:         make([]ParsedJournal, 0),
 			FreeBusy:         make([]ParsedFreeBusy, 0),
 			TimeZones:        make([]ParsedTimeZone, 0),
 			Alarms:           make([]ParsedAlarm, 0),
@@ -26,20 +25,21 @@ func ParseICalendar(data string) (*ParsedCalendarData, error) {
 }
 
 type icalParser struct {
-	scanner         *bufio.Scanner
-	result          *ParsedCalendarData
-	currentEvent    *ParsedEvent
-	currentTodo     *ParsedTodo
-	currentJournal  *ParsedJournal
-	currentFreeBusy *ParsedFreeBusy
-	currentTimeZone *ParsedTimeZone
-	currentAlarm    *ParsedAlarm
-	inEvent         bool
-	inTodo          bool
-	inJournal       bool
-	inFreeBusy      bool
-	inTimeZone      bool
-	inAlarm         bool
+	scanner            *bufio.Scanner
+	result             *ParsedCalendarData
+	currentEvent       *ParsedEvent
+	currentTodo        *ParsedTodo
+	currentFreeBusy    *ParsedFreeBusy
+	currentTimeZone    *ParsedTimeZone
+	currentTZComponent *ParsedTimeZoneComponent
+	currentAlarm       *ParsedAlarm
+	inEvent            bool
+	inTodo             bool
+	inFreeBusy         bool
+	inTimeZone         bool
+	inTZStandard       bool
+	inTZDaylight       bool
+	inAlarm            bool
 }
 
 func (p *icalParser) parse() (*ParsedCalendarData, error) {
@@ -140,6 +140,11 @@ func (p *icalParser) handleBegin(component string) {
 			Attendees:        make([]ParsedAttendee, 0),
 			Categories:       make([]string, 0),
 			ExceptionDates:   make([]time.Time, 0),
+			RelatedTo:        make([]RelatedEvent, 0),
+			Attachments:      make([]Attachment, 0),
+			Contacts:         make([]string, 0),
+			Comments:         make([]string, 0),
+			RequestStatus:    make([]RequestStatus, 0),
 			Alarms:           make([]ParsedAlarm, 0),
 			CustomProperties: make(map[string]string),
 		}
@@ -147,12 +152,11 @@ func (p *icalParser) handleBegin(component string) {
 		p.inTodo = true
 		p.currentTodo = &ParsedTodo{
 			Categories:       make([]string, 0),
-			CustomProperties: make(map[string]string),
-		}
-	case "VJOURNAL":
-		p.inJournal = true
-		p.currentJournal = &ParsedJournal{
-			Categories:       make([]string, 0),
+			RelatedTo:        make([]RelatedEvent, 0),
+			Attachments:      make([]Attachment, 0),
+			Contacts:         make([]string, 0),
+			Comments:         make([]string, 0),
+			RequestStatus:    make([]RequestStatus, 0),
 			CustomProperties: make(map[string]string),
 		}
 	case "VFREEBUSY":
@@ -165,7 +169,23 @@ func (p *icalParser) handleBegin(component string) {
 	case "VTIMEZONE":
 		p.inTimeZone = true
 		p.currentTimeZone = &ParsedTimeZone{
+			StandardTime: ParsedTimeZoneComponent{
+				CustomProperties: make(map[string]string),
+			},
+			DaylightTime: ParsedTimeZoneComponent{
+				CustomProperties: make(map[string]string),
+			},
 			CustomProperties: make(map[string]string),
+		}
+	case "STANDARD":
+		if p.inTimeZone {
+			p.inTZStandard = true
+			p.currentTZComponent = &p.currentTimeZone.StandardTime
+		}
+	case "DAYLIGHT":
+		if p.inTimeZone {
+			p.inTZDaylight = true
+			p.currentTZComponent = &p.currentTimeZone.DaylightTime
 		}
 	case "VALARM":
 		p.inAlarm = true
@@ -190,12 +210,6 @@ func (p *icalParser) handleEnd(component string) {
 			p.currentTodo = nil
 			p.inTodo = false
 		}
-	case "VJOURNAL":
-		if p.inJournal && p.currentJournal != nil {
-			p.result.Journals = append(p.result.Journals, *p.currentJournal)
-			p.currentJournal = nil
-			p.inJournal = false
-		}
 	case "VFREEBUSY":
 		if p.inFreeBusy && p.currentFreeBusy != nil {
 			p.result.FreeBusy = append(p.result.FreeBusy, *p.currentFreeBusy)
@@ -207,6 +221,16 @@ func (p *icalParser) handleEnd(component string) {
 			p.result.TimeZones = append(p.result.TimeZones, *p.currentTimeZone)
 			p.currentTimeZone = nil
 			p.inTimeZone = false
+		}
+	case "STANDARD":
+		if p.inTZStandard {
+			p.inTZStandard = false
+			p.currentTZComponent = nil
+		}
+	case "DAYLIGHT":
+		if p.inTZDaylight {
+			p.inTZDaylight = false
+			p.currentTZComponent = nil
 		}
 	case "VALARM":
 		if p.inAlarm && p.currentAlarm != nil {
@@ -229,12 +253,14 @@ func (p *icalParser) handleProperty(property, value string, params map[string]st
 		p.handleEventProperty(property, value, params)
 	} else if p.inTodo && p.currentTodo != nil {
 		p.handleTodoProperty(property, value, params)
-	} else if p.inJournal && p.currentJournal != nil {
-		p.handleJournalProperty(property, value, params)
 	} else if p.inFreeBusy && p.currentFreeBusy != nil {
 		p.handleFreeBusyProperty(property, value, params)
 	} else if p.inTimeZone && p.currentTimeZone != nil {
-		p.handleTimeZoneProperty(property, value, params)
+		if (p.inTZStandard || p.inTZDaylight) && p.currentTZComponent != nil {
+			p.handleTimeZoneComponentProperty(property, value, params)
+		} else {
+			p.handleTimeZoneProperty(property, value, params)
+		}
 	} else {
 		// Global custom properties
 		p.result.CustomProperties[property] = value
@@ -243,7 +269,7 @@ func (p *icalParser) handleProperty(property, value string, params map[string]st
 
 func (p *icalParser) handleEventProperty(property, value string, params map[string]string) {
 	switch property {
-	case "UID", "DURATION", "SUMMARY", "LOCATION", "STATUS", "TRANSP", "CLASS", "URL", "RRULE":
+	case "UID", "DURATION", "SUMMARY", "LOCATION", "STATUS", "TRANSP", "CLASS", "URL", "RRULE", "EXRULE":
 		p.setEventStringProperty(property, value)
 	case "DTSTAMP", "DTSTART", "DTEND", "RECURRENCE-ID", "CREATED", "LAST-MODIFIED":
 		p.setEventTimeProperty(property, value, params)
@@ -255,10 +281,20 @@ func (p *icalParser) handleEventProperty(property, value string, params map[stri
 		p.currentEvent.Organizer = p.parseOrganizer(value, params)
 	case "ATTENDEE":
 		p.currentEvent.Attendees = append(p.currentEvent.Attendees, p.parseAttendee(value, params))
+	case "RDATE":
+		p.parseRDates(value, params)
 	case "EXDATE":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentEvent.ExceptionDates = append(p.currentEvent.ExceptionDates, *t)
-		}
+		p.parseEXDates(value, params)
+	case "RELATED-TO":
+		p.currentEvent.RelatedTo = append(p.currentEvent.RelatedTo, p.parseRelatedTo(value, params))
+	case "ATTACH":
+		p.currentEvent.Attachments = append(p.currentEvent.Attachments, p.parseAttachment(value, params))
+	case "CONTACT":
+		p.currentEvent.Contacts = append(p.currentEvent.Contacts, value)
+	case "COMMENT":
+		p.currentEvent.Comments = append(p.currentEvent.Comments, value)
+	case "REQUEST-STATUS":
+		p.currentEvent.RequestStatus = append(p.currentEvent.RequestStatus, p.parseRequestStatus(value))
 	case "SEQUENCE", "PRIORITY":
 		p.setEventIntProperty(property, value)
 	case "GEO":
@@ -288,6 +324,8 @@ func (p *icalParser) setEventStringProperty(property, value string) {
 		p.currentEvent.URL = value
 	case "RRULE":
 		p.currentEvent.RecurrenceRule = value
+	case "EXRULE":
+		p.currentEvent.ExceptionRule = value
 	}
 }
 
@@ -376,45 +414,18 @@ func (p *icalParser) handleTodoProperty(property, value string, params map[strin
 		p.currentTodo.Class = value
 	case "URL":
 		p.currentTodo.URL = value
+	case "RELATED-TO":
+		p.currentTodo.RelatedTo = append(p.currentTodo.RelatedTo, p.parseRelatedTo(value, params))
+	case "ATTACH":
+		p.currentTodo.Attachments = append(p.currentTodo.Attachments, p.parseAttachment(value, params))
+	case "CONTACT":
+		p.currentTodo.Contacts = append(p.currentTodo.Contacts, value)
+	case "COMMENT":
+		p.currentTodo.Comments = append(p.currentTodo.Comments, value)
+	case "REQUEST-STATUS":
+		p.currentTodo.RequestStatus = append(p.currentTodo.RequestStatus, p.parseRequestStatus(value))
 	default:
 		p.currentTodo.CustomProperties[property] = value
-	}
-}
-
-func (p *icalParser) handleJournalProperty(property, value string, params map[string]string) {
-	switch property {
-	case "UID":
-		p.currentJournal.UID = value
-	case "DTSTAMP":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentJournal.DTStamp = t
-		}
-	case "DTSTART":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentJournal.DTStart = t
-		}
-	case "SUMMARY":
-		p.currentJournal.Summary = value
-	case "DESCRIPTION":
-		p.currentJournal.Description = value
-	case "STATUS":
-		p.currentJournal.Status = value
-	case "CATEGORIES":
-		p.currentJournal.Categories = append(p.currentJournal.Categories, strings.Split(value, ",")...)
-	case "CREATED":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentJournal.Created = t
-		}
-	case "LAST-MODIFIED":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentJournal.LastModified = t
-		}
-	case "SEQUENCE":
-		p.currentJournal.Sequence = p.parseInt(value)
-	case "CLASS":
-		p.currentJournal.Class = value
-	default:
-		p.currentJournal.CustomProperties[property] = value
 	}
 }
 
@@ -456,6 +467,36 @@ func (p *icalParser) handleTimeZoneProperty(property, value string, params map[s
 	}
 }
 
+func (p *icalParser) handleTimeZoneComponentProperty(property, value string, params map[string]string) {
+	switch property {
+	case "DTSTART":
+		if t := p.parseTime(value, params); t != nil {
+			p.currentTZComponent.DTStart = t
+		}
+	case "TZOFFSETFROM":
+		p.currentTZComponent.TZOffsetFrom = value
+	case "TZOFFSETTO":
+		p.currentTZComponent.TZOffsetTo = value
+	case "TZNAME":
+		p.currentTZComponent.TZName = value
+	case "RRULE":
+		p.currentTZComponent.RecurrenceRule = value
+	case "RDATE":
+		dates := p.parseTimeDates(value, params)
+		p.currentTZComponent.RecurrenceDates = append(p.currentTZComponent.RecurrenceDates, dates...)
+	case "EXDATE":
+		dates := p.parseTimeDates(value, params)
+		p.currentTZComponent.ExceptionDates = append(p.currentTZComponent.ExceptionDates, dates...)
+	case "COMMENT":
+		p.currentTZComponent.Comment = append(p.currentTZComponent.Comment, value)
+	default:
+		if p.currentTZComponent.CustomProperties == nil {
+			p.currentTZComponent.CustomProperties = make(map[string]string)
+		}
+		p.currentTZComponent.CustomProperties[property] = value
+	}
+}
+
 func (p *icalParser) handleAlarmProperty(property, value string, params map[string]string) {
 	switch property {
 	case "ACTION":
@@ -478,20 +519,7 @@ func (p *icalParser) handleAlarmProperty(property, value string, params map[stri
 }
 
 func (p *icalParser) parseTime(value string, params map[string]string) *time.Time {
-	// Basic parsing of common iCalendar time formats
-	formats := []string{
-		"20060102T150405Z", // UTC time
-		"20060102T150405",  // Local time
-		"20060102",         // Date only
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, value); err == nil {
-			return &t
-		}
-	}
-
-	return nil
+	return ParseCalDAVTimeWithParams(value, params)
 }
 
 func (p *icalParser) parseInt(value string) int {
@@ -616,4 +644,87 @@ func (p *icalParser) parseFreeBusyPeriod(value string, params map[string]string)
 	}
 
 	return fb
+}
+
+func (p *icalParser) parseRDates(value string, params map[string]string) {
+	dates := strings.Split(value, ",")
+	for _, dateStr := range dates {
+		if t := p.parseTime(strings.TrimSpace(dateStr), params); t != nil {
+			p.currentEvent.RecurrenceDates = append(p.currentEvent.RecurrenceDates, *t)
+		}
+	}
+}
+
+func (p *icalParser) parseEXDates(value string, params map[string]string) {
+	dates := strings.Split(value, ",")
+	for _, dateStr := range dates {
+		if t := p.parseTime(strings.TrimSpace(dateStr), params); t != nil {
+			p.currentEvent.ExceptionDates = append(p.currentEvent.ExceptionDates, *t)
+		}
+	}
+}
+
+func (p *icalParser) parseTimeDates(value string, params map[string]string) []time.Time {
+	return ParseCalDAVTimeDates(value, params)
+}
+
+func (p *icalParser) parseRelatedTo(value string, params map[string]string) RelatedEvent {
+	relType := params["RELTYPE"]
+	if relType == "" {
+		relType = "PARENT"
+	}
+	return RelatedEvent{
+		UID:          value,
+		RelationType: relType,
+	}
+}
+
+func (p *icalParser) parseAttachment(value string, params map[string]string) Attachment {
+	attachment := Attachment{
+		CustomParams: make(map[string]string),
+	}
+
+	if params["VALUE"] == "BINARY" {
+		attachment.Value = value
+		attachment.Encoding = params["ENCODING"]
+	} else {
+		attachment.URI = value
+	}
+
+	if formatType, exists := params["FMTTYPE"]; exists {
+		attachment.FormatType = formatType
+	}
+
+	if filename, exists := params["FILENAME"]; exists {
+		attachment.Filename = filename
+	}
+
+	if size := p.parseInt(params["SIZE"]); size > 0 {
+		attachment.Size = size
+	}
+
+	for key, val := range params {
+		if key != "VALUE" && key != "ENCODING" && key != "FMTTYPE" && key != "FILENAME" && key != "SIZE" {
+			attachment.CustomParams[key] = val
+		}
+	}
+
+	return attachment
+}
+
+func (p *icalParser) parseRequestStatus(value string) RequestStatus {
+	parts := strings.SplitN(value, ";", 3)
+	status := RequestStatus{
+		Code: parts[0],
+	}
+
+	if len(parts) > 1 {
+		status.Description = parts[1]
+	}
+
+	if len(parts) > 2 {
+		status.ExtraData = parts[2]
+	}
+
+	return status
 }

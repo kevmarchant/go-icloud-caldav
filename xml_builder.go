@@ -2,154 +2,307 @@ package caldav
 
 import (
 	"bytes"
-	"encoding/xml"
-	"fmt"
+	"strings"
 	"time"
 )
 
+var propElementMap = map[string]string{
+	"displayname":                      `<D:displayname/>`,
+	"resourcetype":                     `<D:resourcetype/>`,
+	"current-user-principal":           `<D:current-user-principal/>`,
+	"owner":                            `<D:owner/>`,
+	"calendar-home-set":                `<C:calendar-home-set/>`,
+	"calendar-description":             `<C:calendar-description/>`,
+	"calendar-color":                   `<A:calendar-color/>`,
+	"calendar-order":                   `<A:calendar-order/>`,
+	"supported-calendar-component-set": `<C:supported-calendar-component-set/>`,
+	"getctag":                          `<CS:getctag/>`,
+	"getetag":                          `<D:getetag/>`,
+	"calendar-data":                    `<C:calendar-data/>`,
+	"calendar-timezone":                `<C:calendar-timezone/>`,
+	"max-resource-size":                `<C:max-resource-size/>`,
+	"min-date-time":                    `<C:min-date-time/>`,
+	"max-date-time":                    `<C:max-date-time/>`,
+	"max-instances":                    `<C:max-instances/>`,
+	"max-attendees-per-instance":       `<C:max-attendees-per-instance/>`,
+	"current-user-privilege-set":       `<D:current-user-privilege-set/>`,
+	"source":                           `<D:source/>`,
+	"supported-report-set":             `<D:supported-report-set/>`,
+	"quota-used-bytes":                 `<D:quota-used-bytes/>`,
+	"quota-available-bytes":            `<D:quota-available-bytes/>`,
+	"acl":                              `<D:acl/>`,
+	"supported-privilege-set":          `<D:supported-privilege-set/>`,
+	"acl-restrictions":                 `<D:acl-restrictions/>`,
+	"inherited-acl-set":                `<D:inherited-acl-set/>`,
+	"principal-URL":                    `<D:principal-URL/>`,
+	"alternate-URI-set":                `<D:alternate-URI-set/>`,
+	"group-member-set":                 `<D:group-member-set/>`,
+	"group-membership":                 `<D:group-membership/>`,
+	"calendar-user-address-set":        `<C:calendar-user-address-set/>`,
+	"schedule-inbox-URL":               `<C:schedule-inbox-URL/>`,
+	"schedule-outbox-URL":              `<C:schedule-outbox-URL/>`,
+}
+
+const (
+	xmlHeader     = `<?xml version="1.0" encoding="utf-8"?>`
+	propfindStart = `<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/" xmlns:A="http://apple.com/ns/ical/">`
+	propStart     = `<D:prop>`
+	propEnd       = `</D:prop>`
+	propfindEnd   = `</D:propfind>`
+
+	avgPropElementSize = 45
+	baseXMLOverhead    = 200
+)
+
 func buildPropfindXML(props []string) ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
-	buf.WriteString(`<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/" xmlns:A="http://apple.com/ns/ical/">`)
-	buf.WriteString(`<D:prop>`)
+	if len(props) == 0 {
+		return buildEmptyPropfindXML(), nil
+	}
+
+	estimatedSize := baseXMLOverhead + len(props)*avgPropElementSize
+	buf := make([]byte, 0, estimatedSize)
+
+	buf = append(buf, xmlHeader...)
+	buf = append(buf, propfindStart...)
+	buf = append(buf, propStart...)
 
 	for _, prop := range props {
-		switch prop {
-		case "displayname":
-			buf.WriteString(`<D:displayname/>`)
-		case "resourcetype":
-			buf.WriteString(`<D:resourcetype/>`)
-		case "current-user-principal":
-			buf.WriteString(`<D:current-user-principal/>`)
-		case "owner":
-			buf.WriteString(`<D:owner/>`)
-		case "calendar-home-set":
-			buf.WriteString(`<C:calendar-home-set/>`)
-		case "calendar-description":
-			buf.WriteString(`<C:calendar-description/>`)
-		case "calendar-color":
-			buf.WriteString(`<A:calendar-color/>`)
-		case "calendar-order":
-			buf.WriteString(`<A:calendar-order/>`)
-		case "supported-calendar-component-set":
-			buf.WriteString(`<C:supported-calendar-component-set/>`)
-		case "getctag":
-			buf.WriteString(`<CS:getctag/>`)
-		case "getetag":
-			buf.WriteString(`<D:getetag/>`)
-		case "calendar-data":
-			buf.WriteString(`<C:calendar-data/>`)
+		if element, exists := propElementMap[prop]; exists {
+			buf = append(buf, element...)
 		}
 	}
 
-	buf.WriteString(`</D:prop>`)
-	buf.WriteString(`</D:propfind>`)
+	buf = append(buf, propEnd...)
+	buf = append(buf, propfindEnd...)
 
-	return buf.Bytes(), nil
+	return buf, nil
 }
 
-func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
-	buf.WriteString(`<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">`)
+func buildEmptyPropfindXML() []byte {
+	return []byte(xmlHeader + propfindStart + propStart + propEnd + propfindEnd)
+}
 
-	buf.WriteString(`<D:prop>`)
-	for _, prop := range query.Properties {
-		switch prop {
-		case "getetag":
-			buf.WriteString(`<D:getetag/>`)
-		case "calendar-data":
-			buf.WriteString(`<C:calendar-data/>`)
+type XMLBuilder struct {
+	buf    bytes.Buffer
+	indent int
+}
+
+func NewXMLBuilder(initialCapacity int) *XMLBuilder {
+	builder := &XMLBuilder{}
+	builder.buf.Grow(initialCapacity)
+	return builder
+}
+
+func (xb *XMLBuilder) WriteHeader() *XMLBuilder {
+	xb.buf.WriteString(xmlHeader)
+	return xb
+}
+
+func (xb *XMLBuilder) WriteStartElement(name string, attrs ...string) *XMLBuilder {
+	xb.buf.WriteByte('<')
+	xb.buf.WriteString(name)
+
+	for i := 0; i < len(attrs); i += 2 {
+		if i+1 < len(attrs) {
+			xb.buf.WriteString(` `)
+			xb.buf.WriteString(attrs[i])
+			xb.buf.WriteString(`="`)
+			xb.buf.WriteString(xmlEscape(attrs[i+1]))
+			xb.buf.WriteByte('"')
 		}
 	}
-	buf.WriteString(`</D:prop>`)
 
-	if query.Filter.Component != "" || query.TimeRange != nil || len(query.Filter.CompFilters) > 0 {
-		buf.WriteString(`<C:filter>`)
-		buf.WriteString(`<C:comp-filter name="VCALENDAR">`)
+	xb.buf.WriteByte('>')
+	return xb
+}
 
-		if query.Filter.Component != "" && query.Filter.Component != "VCALENDAR" {
-			writeComponentFilter(&buf, query.Filter)
-		} else if query.Filter.Component == "VCALENDAR" {
-			writePropFilters(&buf, query.Filter.Props)
-			if query.Filter.TimeRange != nil {
-				writeTimeRange(&buf, query.Filter.TimeRange)
-			}
-			for _, compFilter := range query.Filter.CompFilters {
-				writeComponentFilter(&buf, compFilter)
-			}
-		} else if len(query.Filter.CompFilters) > 0 {
-			for _, compFilter := range query.Filter.CompFilters {
-				writeComponentFilter(&buf, compFilter)
-			}
-		} else if query.TimeRange != nil {
-			buf.WriteString(`<C:comp-filter name="VEVENT">`)
-			writeTimeRange(&buf, query.TimeRange)
-			buf.WriteString(`</C:comp-filter>`)
+func (xb *XMLBuilder) WriteEndElement(name string) *XMLBuilder {
+	xb.buf.WriteString(`</`)
+	xb.buf.WriteString(name)
+	xb.buf.WriteByte('>')
+	return xb
+}
+
+func (xb *XMLBuilder) WriteSelfClosingElement(name string, attrs ...string) *XMLBuilder {
+	xb.buf.WriteByte('<')
+	xb.buf.WriteString(name)
+
+	for i := 0; i < len(attrs); i += 2 {
+		if i+1 < len(attrs) {
+			xb.buf.WriteString(` `)
+			xb.buf.WriteString(attrs[i])
+			xb.buf.WriteString(`="`)
+			xb.buf.WriteString(xmlEscape(attrs[i+1]))
+			xb.buf.WriteByte('"')
 		}
-
-		buf.WriteString(`</C:comp-filter>`)
-		buf.WriteString(`</C:filter>`)
 	}
 
-	buf.WriteString(`</C:calendar-query>`)
-
-	return buf.Bytes(), nil
+	xb.buf.WriteString(`/>`)
+	return xb
 }
 
-func writeComponentFilter(buf *bytes.Buffer, filter Filter) {
-	fmt.Fprintf(buf, `<C:comp-filter name="%s">`, filter.Component)
-
-	writePropFilters(buf, filter.Props)
-
-	if filter.TimeRange != nil {
-		writeTimeRange(buf, filter.TimeRange)
-	}
-
-	for _, compFilter := range filter.CompFilters {
-		writeComponentFilter(buf, compFilter)
-	}
-
-	buf.WriteString(`</C:comp-filter>`)
+func (xb *XMLBuilder) WriteText(text string) *XMLBuilder {
+	xb.buf.WriteString(xmlEscape(text))
+	return xb
 }
 
-func writePropFilters(buf *bytes.Buffer, props []PropFilter) {
-	for _, propFilter := range props {
-		fmt.Fprintf(buf, `<C:prop-filter name="%s">`, propFilter.Name)
-
-		if propFilter.TextMatch != nil {
-			negateAttr := ""
-			if propFilter.TextMatch.NegateCondition {
-				negateAttr = ` negate-condition="yes"`
-			}
-			collationAttr := ""
-			if propFilter.TextMatch.Collation != "" {
-				collationAttr = fmt.Sprintf(` collation="%s"`, propFilter.TextMatch.Collation)
-			}
-			fmt.Fprintf(buf, `<C:text-match%s%s>%s</C:text-match>`,
-				collationAttr, negateAttr, xmlEscape(propFilter.TextMatch.Value))
-		}
-
-		if propFilter.TimeRange != nil {
-			writeTimeRange(buf, propFilter.TimeRange)
-		}
-
-		buf.WriteString(`</C:prop-filter>`)
-	}
+func (xb *XMLBuilder) WriteRawString(raw string) *XMLBuilder {
+	xb.buf.WriteString(raw)
+	return xb
 }
 
-func writeTimeRange(buf *bytes.Buffer, tr *TimeRange) {
-	startStr := formatTimeForCalDAV(tr.Start)
-	endStr := formatTimeForCalDAV(tr.End)
-	fmt.Fprintf(buf, `<C:time-range start="%s" end="%s"/>`, startStr, endStr)
+func (xb *XMLBuilder) Bytes() []byte {
+	return xb.buf.Bytes()
 }
+
+func (xb *XMLBuilder) String() string {
+	return xb.buf.String()
+}
+
+func (xb *XMLBuilder) Reset() {
+	xb.buf.Reset()
+	xb.indent = 0
+}
+
+var xmlReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	"\"", "&#34;",
+	"'", "&#39;",
+)
 
 func xmlEscape(s string) string {
-	var buf bytes.Buffer
-	_ = xml.EscapeText(&buf, []byte(s))
-	return buf.String()
+	if !needsEscaping(s) {
+		return s
+	}
+	return xmlReplacer.Replace(s)
+}
+
+func needsEscaping(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '&', '<', '>', '"', '\'':
+			return true
+		}
+	}
+	return false
 }
 
 func formatTimeForCalDAV(t time.Time) string {
 	return t.UTC().Format("20060102T150405Z")
+}
+
+func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
+	estimatedSize := 500 + len(query.Properties)*30
+	if query.Filter.Component != "" {
+		estimatedSize += 200
+	}
+	if query.TimeRange != nil {
+		estimatedSize += 100
+	}
+
+	builder := NewXMLBuilder(estimatedSize)
+
+	builder.WriteHeader().
+		WriteStartElement("C:calendar-query",
+			"xmlns:D", "DAV:",
+			"xmlns:C", "urn:ietf:params:xml:ns:caldav").
+		WriteStartElement("D:prop")
+
+	for _, prop := range query.Properties {
+		switch prop {
+		case "getetag":
+			builder.WriteSelfClosingElement("D:getetag")
+		case "calendar-data":
+			builder.WriteSelfClosingElement("C:calendar-data")
+		default:
+			if element, exists := propElementMap[prop]; exists {
+				builder.WriteRawString(element)
+			}
+		}
+	}
+
+	builder.WriteEndElement("D:prop")
+
+	if query.Filter.Component != "" || query.TimeRange != nil || len(query.Filter.CompFilters) > 0 {
+		builder.WriteStartElement("C:filter").
+			WriteStartElement("C:comp-filter", "name", "VCALENDAR")
+
+		if query.Filter.Component != "" && query.Filter.Component != "VCALENDAR" {
+			writeComponentFilter(builder, query.Filter)
+		} else if query.Filter.Component == "VCALENDAR" {
+			writePropFilters(builder, query.Filter.Props)
+			if query.Filter.TimeRange != nil {
+				writeTimeRange(builder, query.Filter.TimeRange)
+			}
+			for _, compFilter := range query.Filter.CompFilters {
+				writeComponentFilter(builder, compFilter)
+			}
+		} else if len(query.Filter.CompFilters) > 0 {
+			for _, compFilter := range query.Filter.CompFilters {
+				writeComponentFilter(builder, compFilter)
+			}
+		} else if query.TimeRange != nil {
+			builder.WriteStartElement("C:comp-filter", "name", "VEVENT")
+			writeTimeRange(builder, query.TimeRange)
+			builder.WriteEndElement("C:comp-filter")
+		}
+
+		builder.WriteEndElement("C:comp-filter").
+			WriteEndElement("C:filter")
+	}
+
+	builder.WriteEndElement("C:calendar-query")
+
+	return builder.Bytes(), nil
+}
+
+func writeComponentFilter(builder *XMLBuilder, filter Filter) {
+	builder.WriteStartElement("C:comp-filter", "name", filter.Component)
+
+	writePropFilters(builder, filter.Props)
+
+	if filter.TimeRange != nil {
+		writeTimeRange(builder, filter.TimeRange)
+	}
+
+	for _, compFilter := range filter.CompFilters {
+		writeComponentFilter(builder, compFilter)
+	}
+
+	builder.WriteEndElement("C:comp-filter")
+}
+
+func writePropFilters(builder *XMLBuilder, props []PropFilter) {
+	for _, propFilter := range props {
+		builder.WriteStartElement("C:prop-filter", "name", propFilter.Name)
+
+		if propFilter.TextMatch != nil {
+			attrs := make([]string, 0, 4)
+
+			if propFilter.TextMatch.Collation != "" {
+				attrs = append(attrs, "collation", propFilter.TextMatch.Collation)
+			}
+			if propFilter.TextMatch.NegateCondition {
+				attrs = append(attrs, "negate-condition", "yes")
+			}
+
+			builder.WriteStartElement("C:text-match", attrs...)
+			builder.WriteText(propFilter.TextMatch.Value)
+			builder.WriteEndElement("C:text-match")
+		}
+
+		if propFilter.TimeRange != nil {
+			writeTimeRange(builder, propFilter.TimeRange)
+		}
+
+		builder.WriteEndElement("C:prop-filter")
+	}
+}
+
+func writeTimeRange(builder *XMLBuilder, tr *TimeRange) {
+	startStr := formatTimeForCalDAV(tr.Start)
+	endStr := formatTimeForCalDAV(tr.End)
+	builder.WriteSelfClosingElement("C:time-range", "start", startStr, "end", endStr)
 }

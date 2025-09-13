@@ -221,7 +221,6 @@ func (v *XMLValidator) validateCalendarQueryStructure(xmlData []byte, result *Va
 		"VCALENDAR": true,
 		"VEVENT":    true,
 		"VTODO":     true,
-		"VJOURNAL":  true,
 		"VFREEBUSY": true,
 		"VTIMEZONE": true,
 		"VALARM":    true,

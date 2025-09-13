@@ -4,7 +4,7 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/kevmarchant/go-icloud-caldav.svg)](https://pkg.go.dev/github.com/kevmarchant/go-icloud-caldav)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kevmarchant/go-icloud-caldav)](https://goreportcard.com/report/github.com/kevmarchant/go-icloud-caldav)
-[![Test Coverage](https://img.shields.io/badge/coverage-82.1%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
+[![Test Coverage](https://img.shields.io/badge/coverage-83.6%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Table of Contents
@@ -51,9 +51,18 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 - 🔄 **Incremental Sync** - Support for sync tokens (RFC 6578) for efficient updates
 - 🛡️ **XML Validation** - Auto-correct common XML issues before sending requests
 - 🔌 **Connection Management** - Connection pooling, retry logic with exponential backoff
-- 🎯 **Typed Errors** - Comprehensive error categorization for better error handling
+- 🎯 **Typed Errors** - Comprehensive error categorisation for better error handling
 - 🔍 **Advanced Filtering** - Nested component filters, text matching, time ranges
 - 📈 **Metrics Collection** - Track connection reuse, retry attempts, and performance
+
+### New in v0.2.0
+
+- 🗄️ **Response Caching** - Intelligent caching with TTL and statistics
+- 🔄 **RRULE Parsing** - Native recurrence rule parsing and expansion
+- 🌍 **Enhanced Timezone Support** - Better timezone handling and conversion
+- 🔐 **Access Control Lists** - Calendar permission management
+- 📎 **Attachment Support** - Handle calendar event attachments
+- 🎯 **Server Compatibility** - Automatic detection of CalDAV server types (iCloud, Google, Nextcloud)
 
 ## Installation
 
@@ -466,7 +475,7 @@ go run examples/filtering.go
 
 ## Performance
 
-The library includes several performance optimizations:
+The library includes several performance optimisations:
 
 ### Using Parallel Operations
 
@@ -495,7 +504,7 @@ go test -bench=. -benchmem ./...
 Performance results from production testing:
 
 - Successfully synced 4,182 events across 9 calendars
-- 82.1% test coverage with comprehensive benchmarks
+- 83.6% test coverage with comprehensive benchmarks
 - Memory-efficient with minimal allocations
 
 ## Testing
@@ -691,6 +700,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 Recent highlights:
 
+- v0.2.0 - Major feature expansion: caching, RRULE parsing, timezone support, ACLs, attachments
 - v0.1.2 - Major feature release: parallel operations, sync tokens, iCal parser, XML validation
 - v0.1.1 - Fixed CI/CD issues, improved error handling
 - v0.1.0 - Initial production-ready release with full iCloud support

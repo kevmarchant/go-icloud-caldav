@@ -2,410 +2,298 @@ package caldav
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestQueryCalendarsParallel(t *testing.T) {
-	tests := []struct {
-		name           string
-		numCalendars   int
-		maxConcurrency int
-		expectedErrors int
-		serverDelay    time.Duration
-	}{
-		{
-			name:           "single calendar",
-			numCalendars:   1,
-			maxConcurrency: 1,
-			expectedErrors: 0,
-			serverDelay:    0,
-		},
-		{
-			name:           "multiple calendars sequential",
-			numCalendars:   3,
-			maxConcurrency: 1,
-			expectedErrors: 0,
-			serverDelay:    10 * time.Millisecond,
-		},
-		{
-			name:           "multiple calendars parallel",
-			numCalendars:   5,
-			maxConcurrency: 3,
-			expectedErrors: 0,
-			serverDelay:    10 * time.Millisecond,
-		},
-		{
-			name:           "with errors",
-			numCalendars:   4,
-			maxConcurrency: 2,
-			expectedErrors: 2,
-			serverDelay:    0,
-		},
-		{
-			name:           "more workers than requests",
-			numCalendars:   2,
-			maxConcurrency: 5,
-			expectedErrors: 0,
-			serverDelay:    0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tt.serverDelay > 0 {
-					time.Sleep(tt.serverDelay)
-				}
-
-				calendarPath := r.URL.Path
-				calendarNum := strings.TrimPrefix(calendarPath, "/calendar")
-
-				if tt.expectedErrors > 0 && (calendarNum == "1" || calendarNum == "3") {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-
-				w.Header().Set("Content-Type", "application/xml")
-				w.WriteHeader(http.StatusMultiStatus)
-				_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
-<multistatus xmlns="DAV:">
-  <response>
-    <href>%s/event1.ics</href>
-    <propstat>
-      <prop>
-        <getetag>"12345"</getetag>
-        <calendar-data xmlns="urn:ietf:params:xml:ns:caldav">BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Test//Test//EN
-BEGIN:VEVENT
-UID:test-event-%s-1
-DTSTART:20240101T100000Z
-DTEND:20240101T110000Z
-SUMMARY:Test Event %s-1
-END:VEVENT
-END:VCALENDAR</calendar-data>
-      </prop>
-      <status>HTTP/1.1 200 OK</status>
-    </propstat>
-  </response>
-</multistatus>`, calendarPath, calendarNum, calendarNum)
-			}))
-			defer server.Close()
-
-			client := NewClient("test@example.com", "password")
-			client.baseURL = server.URL
-
-			requests := make([]BatchQueryRequest, tt.numCalendars)
-			for i := 0; i < tt.numCalendars; i++ {
-				requests[i] = BatchQueryRequest{
-					CalendarPath: fmt.Sprintf("/calendar%d", i),
-					Query: CalendarQuery{
-						Properties: []string{"getetag", "calendar-data"},
-					},
-				}
-			}
-
-			config := &BatchQueryConfig{
-				MaxConcurrency: tt.maxConcurrency,
-				Timeout:        5 * time.Second,
-			}
-
-			ctx := context.Background()
-			results := client.QueryCalendarsParallel(ctx, requests, config)
-
-			if len(results) != tt.numCalendars {
-				t.Errorf("expected %d results, got %d", tt.numCalendars, len(results))
-			}
-
-			errorCount := 0
-			successCount := 0
-			for _, result := range results {
-				if result.Error != nil {
-					errorCount++
-				} else {
-					successCount++
-					if len(result.Objects) == 0 {
-						t.Errorf("successful query returned no objects for calendar %s", result.CalendarPath)
-					}
-				}
-			}
-
-			expectedSuccess := tt.numCalendars - tt.expectedErrors
-			if successCount != expectedSuccess {
-				t.Errorf("expected %d successful queries, got %d", expectedSuccess, successCount)
-			}
-		})
-	}
-}
-
-func TestGetRecentEventsParallel(t *testing.T) {
+func TestBatchProcessor_ExecuteBatch(t *testing.T) {
+	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "REPORT" {
-			t.Errorf("expected REPORT method, got %s", r.Method)
-		}
-
-		w.Header().Set("Content-Type", "application/xml")
-		w.WriteHeader(http.StatusMultiStatus)
-		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
-<multistatus xmlns="DAV:">
-  <response>
-    <href>%s/event1.ics</href>
-    <propstat>
-      <prop>
-        <getetag>"12345"</getetag>
-        <calendar-data xmlns="urn:ietf:params:xml:ns:caldav">BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-UID:recent-event-1
-DTSTART:20240101T100000Z
-DTEND:20240101T110000Z
-SUMMARY:Recent Event
-END:VEVENT
-END:VCALENDAR</calendar-data>
-      </prop>
-      <status>HTTP/1.1 200 OK</status>
-    </propstat>
-  </response>
-</multistatus>`, r.URL.Path)
+		requestCount++
+		w.WriteHeader(207)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>` + r.URL.Path + `</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>Test Calendar</D:displayname>
+        <D:resourcetype>
+          <D:collection/>
+          <C:calendar/>
+        </D:resourcetype>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`))
 	}))
 	defer server.Close()
 
-	client := NewClient("test@example.com", "password")
+	client := NewClient("test", "test")
 	client.baseURL = server.URL
 
-	calendarPaths := []string{"/calendar1", "/calendar2", "/calendar3"}
+	processor := NewBatchProcessor(client, 2, 30*time.Second, 3)
 
-	ctx := context.Background()
-	results := client.GetRecentEventsParallel(ctx, calendarPaths, 7, nil)
-
-	if len(results) != len(calendarPaths) {
-		t.Errorf("expected %d results, got %d", len(calendarPaths), len(results))
+	requests := []BatchRequest{
+		{Path: "/calendar1/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
+		{Path: "/calendar2/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
+		{Path: "/calendar3/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
+		{Path: "/calendar4/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
 	}
 
-	for i, result := range results {
-		if result.Error != nil {
-			t.Errorf("unexpected error for calendar %s: %v", calendarPaths[i], result.Error)
+	responses, err := processor.ExecuteBatch(context.Background(), requests)
+	if err != nil {
+		t.Fatalf("ExecuteBatch failed: %v", err)
+	}
+
+	if len(responses) != 4 {
+		t.Errorf("expected 4 responses, got %d", len(responses))
+	}
+
+	for i, resp := range responses {
+		if resp.Error != nil {
+			t.Errorf("response %d has error: %v", i, resp.Error)
 		}
-		if len(result.Objects) == 0 {
-			t.Errorf("no objects returned for calendar %s", calendarPaths[i])
-		}
-	}
-}
-
-func TestAggregateResults(t *testing.T) {
-	results := []BatchQueryResult{
-		{
-			CalendarPath: "/calendar1",
-			Objects: []CalendarObject{
-				{Href: "/calendar1/event1.ics", ETag: "etag1"},
-				{Href: "/calendar1/event2.ics", ETag: "etag2"},
-			},
-			Error: nil,
-		},
-		{
-			CalendarPath: "/calendar2",
-			Objects:      nil,
-			Error:        fmt.Errorf("connection error"),
-		},
-		{
-			CalendarPath: "/calendar3",
-			Objects: []CalendarObject{
-				{Href: "/calendar3/event1.ics", ETag: "etag3"},
-			},
-			Error: nil,
-		},
-	}
-
-	objects, errors := AggregateResults(results)
-
-	if len(objects) != 3 {
-		t.Errorf("expected 3 objects, got %d", len(objects))
-	}
-
-	if len(errors) != 1 {
-		t.Errorf("expected 1 error, got %d", len(errors))
-	}
-
-	if !strings.Contains(errors[0].Error(), "calendar2") {
-		t.Errorf("error should mention calendar2: %v", errors[0])
-	}
-}
-
-func TestCountObjectsInResults(t *testing.T) {
-	results := []BatchQueryResult{
-		{
-			Objects: []CalendarObject{{}, {}, {}},
-			Error:   nil,
-		},
-		{
-			Objects: nil,
-			Error:   fmt.Errorf("error"),
-		},
-		{
-			Objects: []CalendarObject{{}, {}},
-			Error:   nil,
-		},
-	}
-
-	count := CountObjectsInResults(results)
-	if count != 5 {
-		t.Errorf("expected 5 objects, got %d", count)
-	}
-}
-
-func TestFilterSuccessfulResults(t *testing.T) {
-	results := []BatchQueryResult{
-		{CalendarPath: "/cal1", Error: nil},
-		{CalendarPath: "/cal2", Error: fmt.Errorf("error")},
-		{CalendarPath: "/cal3", Error: nil},
-	}
-
-	successful := FilterSuccessfulResults(results)
-	if len(successful) != 2 {
-		t.Errorf("expected 2 successful results, got %d", len(successful))
-	}
-
-	for _, result := range successful {
-		if result.Error != nil {
-			t.Errorf("successful result should not have error: %v", result.Error)
+		if resp.Response == nil {
+			t.Errorf("response %d has nil response", i)
 		}
 	}
+
+	if requestCount != 4 {
+		t.Errorf("expected 4 HTTP requests, got %d", requestCount)
+	}
 }
 
-func TestFilterFailedResults(t *testing.T) {
-	results := []BatchQueryResult{
-		{CalendarPath: "/cal1", Error: nil},
-		{CalendarPath: "/cal2", Error: fmt.Errorf("error1")},
-		{CalendarPath: "/cal3", Error: fmt.Errorf("error2")},
+func TestBatchProcessor_OptimizeBatch(t *testing.T) {
+	client := NewClient("test", "test")
+	processor := NewBatchProcessor(client, 10, 30*time.Second, 3)
+
+	requests := []BatchRequest{
+		{Path: "/cal1/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
+		{Path: "/cal2/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
+		{Path: "/cal3/", Properties: []string{"getctag"}, Depth: "1"},
+		{Path: "/cal4/", Properties: []string{"displayname", "resourcetype"}, Depth: "0"},
 	}
 
-	failed := FilterFailedResults(results)
-	if len(failed) != 2 {
-		t.Errorf("expected 2 failed results, got %d", len(failed))
+	optimized := processor.optimizeBatch(requests)
+
+	if len(optimized) != 4 {
+		t.Errorf("expected 4 optimized requests, got %d", len(optimized))
 	}
 
-	for _, result := range failed {
-		if result.Error == nil {
-			t.Errorf("failed result should have error")
+	groupCounts := make(map[string]int)
+	for _, req := range optimized {
+		key := processor.createPropertyKey(req.Properties, req.Depth)
+		groupCounts[key]++
+	}
+
+	if len(groupCounts) != 2 {
+		t.Errorf("expected 2 property groups, got %d", len(groupCounts))
+	}
+
+	expectedKey1 := "0:displayname,resourcetype"
+	expectedKey2 := "1:getctag"
+
+	if groupCounts[expectedKey1] != 3 {
+		t.Errorf("expected 3 requests in group '%s', got %d", expectedKey1, groupCounts[expectedKey1])
+	}
+
+	if groupCounts[expectedKey2] != 1 {
+		t.Errorf("expected 1 request in group '%s', got %d", expectedKey2, groupCounts[expectedKey2])
+	}
+}
+
+func TestBatchProcessor_SplitIntoBatches(t *testing.T) {
+	client := NewClient("test", "test")
+	processor := NewBatchProcessor(client, 3, 30*time.Second, 3)
+
+	requests := make([]BatchRequest, 10)
+	for i := range requests {
+		requests[i] = BatchRequest{
+			Path:       "/calendar" + string(rune('1'+i)) + "/",
+			Properties: []string{"displayname"},
+			Depth:      "0",
 		}
 	}
-}
 
-func TestDefaultBatchQueryConfig(t *testing.T) {
-	config := DefaultBatchQueryConfig()
+	batches := processor.splitIntoBatches(requests, 3)
 
-	if config.MaxConcurrency != 5 {
-		t.Errorf("expected default MaxConcurrency to be 5, got %d", config.MaxConcurrency)
+	expectedBatches := 4
+	if len(batches) != expectedBatches {
+		t.Errorf("expected %d batches, got %d", expectedBatches, len(batches))
 	}
 
-	if config.Timeout != 30*time.Second {
-		t.Errorf("expected default Timeout to be 30s, got %v", config.Timeout)
+	if len(batches[0]) != 3 {
+		t.Errorf("expected first batch to have 3 requests, got %d", len(batches[0]))
+	}
+
+	if len(batches[3]) != 1 {
+		t.Errorf("expected last batch to have 1 request, got %d", len(batches[3]))
 	}
 }
 
-func TestQueryCalendarsParallelWithNilConfig(t *testing.T) {
+func TestBatchProcessor_WithCache(t *testing.T) {
+	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/xml")
-		w.WriteHeader(http.StatusMultiStatus)
-		_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
-<multistatus xmlns="DAV:">
-  <response>
-    <href>/event.ics</href>
-    <propstat>
-      <prop>
-        <getetag>"12345"</getetag>
-        <calendar-data xmlns="urn:ietf:params:xml:ns:caldav">BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-UID:test-event
-DTSTART:20240101T100000Z
-DTEND:20240101T110000Z
-SUMMARY:Test Event
-END:VEVENT
-END:VCALENDAR</calendar-data>
-      </prop>
-      <status>HTTP/1.1 200 OK</status>
-    </propstat>
-  </response>
-</multistatus>`)
+		requestCount++
+		w.WriteHeader(207)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>` + r.URL.Path + `</D:href>
+    <D:propstat>
+      <D:prop><D:displayname>Test</D:displayname></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`))
 	}))
 	defer server.Close()
 
-	client := NewClient("test@example.com", "password")
+	client := NewClientWithOptions("test", "test", WithCache(time.Minute, 100))
 	client.baseURL = server.URL
 
-	requests := []BatchQueryRequest{
-		{
-			CalendarPath: "/calendar1",
-			Query:        CalendarQuery{Properties: []string{"getetag", "calendar-data"}},
-		},
+	processor := NewBatchProcessor(client, 2, 30*time.Second, 2)
+
+	requests := []BatchRequest{
+		{Path: "/calendar/", Properties: []string{"displayname"}, Depth: "0"},
 	}
 
-	ctx := context.Background()
-	results := client.QueryCalendarsParallel(ctx, requests, nil)
-
-	if len(results) != 1 {
-		t.Errorf("expected 1 result, got %d", len(results))
+	_, err := processor.ExecuteBatch(context.Background(), requests)
+	if err != nil {
+		t.Fatalf("first ExecuteBatch failed: %v", err)
 	}
 
-	if results[0].Error != nil {
-		t.Errorf("unexpected error: %v", results[0].Error)
+	_, err = processor.ExecuteBatch(context.Background(), requests)
+	if err != nil {
+		t.Fatalf("second ExecuteBatch failed: %v", err)
 	}
-}
 
-func TestQueryCalendarsParallelEmptyRequests(t *testing.T) {
-	client := NewClient("test@example.com", "password")
-
-	ctx := context.Background()
-	results := client.QueryCalendarsParallel(ctx, []BatchQueryRequest{}, nil)
-
-	if len(results) != 0 {
-		t.Errorf("expected 0 results for empty requests, got %d", len(results))
+	if requestCount != 1 {
+		t.Errorf("expected 1 HTTP request due to caching, got %d", requestCount)
 	}
 }
 
-func TestQueryCalendarsParallelContextCancellation(t *testing.T) {
-	blocked := make(chan struct{})
+func TestCalendarBatchProcessor_BatchDiscoverCalendars(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-blocked
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(207)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:A="http://apple.com/ns/ical/">
+  <D:response>
+    <D:href>/calendars/home/calendar1/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>Personal</D:displayname>
+        <D:resourcetype>
+          <D:collection/>
+          <C:calendar/>
+        </D:resourcetype>
+        <A:calendar-color>#FF0000FF</A:calendar-color>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/calendars/home/calendar2/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>Work</D:displayname>
+        <D:resourcetype>
+          <D:collection/>
+          <C:calendar/>
+        </D:resourcetype>
+        <A:calendar-color>#00FF00FF</A:calendar-color>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`))
 	}))
 	defer server.Close()
-	defer close(blocked)
 
-	client := NewClient("test@example.com", "password")
+	client := NewClient("test", "test")
 	client.baseURL = server.URL
 
-	requests := []BatchQueryRequest{
-		{CalendarPath: "/calendar1", Query: CalendarQuery{}},
-		{CalendarPath: "/calendar2", Query: CalendarQuery{}},
+	processor := client.NewCalendarBatchProcessor()
+
+	homeSetPaths := []string{"/calendars/home/"}
+
+	calendars, err := processor.BatchDiscoverCalendars(context.Background(), homeSetPaths)
+	if err != nil {
+		t.Fatalf("BatchDiscoverCalendars failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if len(calendars) != 2 {
+		t.Errorf("expected 2 calendars, got %d", len(calendars))
+	}
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-
-	results := client.QueryCalendarsParallel(ctx, requests, &BatchQueryConfig{
-		MaxConcurrency: 2,
-		Timeout:        5 * time.Second,
-	})
-
-	errorsFound := 0
-	for _, result := range results {
-		if result.Error != nil {
-			errorsFound++
+	expectedNames := map[string]bool{"Personal": false, "Work": false}
+	for _, cal := range calendars {
+		if _, exists := expectedNames[cal.DisplayName]; exists {
+			expectedNames[cal.DisplayName] = true
 		}
 	}
 
-	if errorsFound == 0 {
-		t.Error("expected errors due to context cancellation")
+	for name, found := range expectedNames {
+		if !found {
+			t.Errorf("expected calendar '%s' not found", name)
+		}
+	}
+}
+
+func TestBatchProcessor_EmptyRequests(t *testing.T) {
+	client := NewClient("test", "test")
+	processor := NewBatchProcessor(client, 10, 30*time.Second, 3)
+
+	responses, err := processor.ExecuteBatch(context.Background(), []BatchRequest{})
+	if err != nil {
+		t.Errorf("ExecuteBatch with empty requests should not error, got: %v", err)
+	}
+
+	if responses != nil {
+		t.Errorf("expected nil responses for empty request batch, got: %v", responses)
+	}
+}
+
+func TestBatchProcessor_Timeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(207)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/test/</D:href>
+    <D:propstat>
+      <D:prop><D:displayname>Test</D:displayname></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test", "test")
+	client.baseURL = server.URL
+
+	processor := NewBatchProcessor(client, 10, 50*time.Millisecond, 3)
+
+	requests := []BatchRequest{
+		{Path: "/test/", Properties: []string{"displayname"}, Depth: "0"},
+	}
+
+	responses, err := processor.ExecuteBatch(context.Background(), requests)
+	if err != nil {
+		t.Fatalf("ExecuteBatch failed: %v", err)
+	}
+
+	if len(responses) != 1 {
+		t.Errorf("expected 1 response, got %d", len(responses))
+	}
+
+	if responses[0].Error == nil {
+		t.Error("expected timeout error, got nil")
 	}
 }

@@ -689,85 +689,6 @@ func TestExtractCalendarObjectsWithAutoParsing_InvalidData(t *testing.T) {
 	}
 }
 
-func TestParseICalendar_Journal(t *testing.T) {
-	icalData := `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Test//Test//EN
-BEGIN:VJOURNAL
-UID:journal-001
-DTSTAMP:20240101T120000Z
-DTSTART:20240115T090000Z
-SUMMARY:Daily Journal Entry
-DESCRIPTION:Today was a productive day
-STATUS:FINAL
-CATEGORIES:Work,Personal
-CREATED:20240115T080000Z
-LAST-MODIFIED:20240115T085000Z
-SEQUENCE:1
-CLASS:PRIVATE
-END:VJOURNAL
-END:VCALENDAR`
-
-	parsed, err := ParseICalendar(icalData)
-	if err != nil {
-		t.Fatalf("ParseICalendar failed: %v", err)
-	}
-
-	if len(parsed.Journals) != 1 {
-		t.Fatalf("Expected 1 journal, got %d", len(parsed.Journals))
-	}
-
-	journal := parsed.Journals[0]
-
-	if journal.UID != "journal-001" {
-		t.Errorf("UID: expected 'journal-001', got %s", journal.UID)
-	}
-
-	if journal.Summary != "Daily Journal Entry" {
-		t.Errorf("Summary: expected 'Daily Journal Entry', got %s", journal.Summary)
-	}
-
-	if journal.Description != "Today was a productive day" {
-		t.Errorf("Description: expected 'Today was a productive day', got %s", journal.Description)
-	}
-
-	if journal.Status != "FINAL" {
-		t.Errorf("Status: expected 'FINAL', got %s", journal.Status)
-	}
-
-	if journal.Sequence != 1 {
-		t.Errorf("Sequence: expected 1, got %d", journal.Sequence)
-	}
-
-	if journal.Class != "PRIVATE" {
-		t.Errorf("Class: expected 'PRIVATE', got %s", journal.Class)
-	}
-
-	if len(journal.Categories) != 2 {
-		t.Fatalf("Expected 2 categories, got %d", len(journal.Categories))
-	}
-
-	expectedCategories := []string{"Work", "Personal"}
-	if !reflect.DeepEqual(journal.Categories, expectedCategories) {
-		t.Errorf("Categories: expected %v, got %v", expectedCategories, journal.Categories)
-	}
-
-	expectedDTStart, _ := time.Parse("20060102T150405Z", "20240115T090000Z")
-	if journal.DTStart == nil || !journal.DTStart.Equal(expectedDTStart) {
-		t.Errorf("DTStart: expected %v, got %v", expectedDTStart, journal.DTStart)
-	}
-
-	expectedCreated, _ := time.Parse("20060102T150405Z", "20240115T080000Z")
-	if journal.Created == nil || !journal.Created.Equal(expectedCreated) {
-		t.Errorf("Created: expected %v, got %v", expectedCreated, journal.Created)
-	}
-
-	expectedLastModified, _ := time.Parse("20060102T150405Z", "20240115T085000Z")
-	if journal.LastModified == nil || !journal.LastModified.Equal(expectedLastModified) {
-		t.Errorf("LastModified: expected %v, got %v", expectedLastModified, journal.LastModified)
-	}
-}
-
 func TestParseICalendar_FreeBusy(t *testing.T) {
 	icalData := `BEGIN:VCALENDAR
 VERSION:2.0
@@ -1614,4 +1535,514 @@ func mustParseTime(value string) time.Time {
 		panic(err)
 	}
 	return t
+}
+
+func TestParseEventMetadata_RelatedTo(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:child-event-123
+DTSTART:20240115T100000Z
+SUMMARY:Child Event
+RELATED-TO;RELTYPE=PARENT:parent-event-uid-456
+RELATED-TO;RELTYPE=SIBLING:sibling-event-uid-789
+RELATED-TO:default-parent-uid-001
+END:VEVENT
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
+	}
+
+	event := parsed.Events[0]
+
+	if len(event.RelatedTo) != 3 {
+		t.Fatalf("Expected 3 related events, got %d", len(event.RelatedTo))
+	}
+
+	expectedRelated := []RelatedEvent{
+		{UID: "parent-event-uid-456", RelationType: "PARENT"},
+		{UID: "sibling-event-uid-789", RelationType: "SIBLING"},
+		{UID: "default-parent-uid-001", RelationType: "PARENT"},
+	}
+
+	for i, expected := range expectedRelated {
+		if event.RelatedTo[i].UID != expected.UID {
+			t.Errorf("RelatedTo[%d] UID: expected %s, got %s", i, expected.UID, event.RelatedTo[i].UID)
+		}
+		if event.RelatedTo[i].RelationType != expected.RelationType {
+			t.Errorf("RelatedTo[%d] RelationType: expected %s, got %s", i, expected.RelationType, event.RelatedTo[i].RelationType)
+		}
+	}
+}
+
+func TestParseEventMetadata_Attachments(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-with-attachments
+DTSTART:20240115T100000Z
+SUMMARY:Event with Attachments
+ATTACH:https://example.com/document.pdf
+ATTACH;FMTTYPE=image/jpeg;FILENAME=photo.jpg;SIZE=1024000:https://example.com/photo.jpg
+ATTACH;VALUE=BINARY;ENCODING=BASE64;FMTTYPE=text/plain:VGVzdCBmaWxlIGNvbnRlbnQ=
+ATTACH;X-CUSTOM-PARAM=custom-value:https://example.com/custom.doc
+END:VEVENT
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
+	}
+
+	event := parsed.Events[0]
+
+	if len(event.Attachments) != 4 {
+		t.Fatalf("Expected 4 attachments, got %d", len(event.Attachments))
+	}
+
+	attachment1 := event.Attachments[0]
+	if attachment1.URI != "https://example.com/document.pdf" {
+		t.Errorf("Attachment 1 URI: expected 'https://example.com/document.pdf', got %s", attachment1.URI)
+	}
+	if attachment1.FormatType != "" {
+		t.Errorf("Attachment 1 FormatType: expected empty, got %s", attachment1.FormatType)
+	}
+
+	attachment2 := event.Attachments[1]
+	if attachment2.URI != "https://example.com/photo.jpg" {
+		t.Errorf("Attachment 2 URI: expected 'https://example.com/photo.jpg', got %s", attachment2.URI)
+	}
+	if attachment2.FormatType != "image/jpeg" {
+		t.Errorf("Attachment 2 FormatType: expected 'image/jpeg', got %s", attachment2.FormatType)
+	}
+	if attachment2.Filename != "photo.jpg" {
+		t.Errorf("Attachment 2 Filename: expected 'photo.jpg', got %s", attachment2.Filename)
+	}
+	if attachment2.Size != 1024000 {
+		t.Errorf("Attachment 2 Size: expected 1024000, got %d", attachment2.Size)
+	}
+
+	attachment3 := event.Attachments[2]
+	if attachment3.Value != "VGVzdCBmaWxlIGNvbnRlbnQ=" {
+		t.Errorf("Attachment 3 Value: expected 'VGVzdCBmaWxlIGNvbnRlbnQ=', got %s", attachment3.Value)
+	}
+	if attachment3.Encoding != "BASE64" {
+		t.Errorf("Attachment 3 Encoding: expected 'BASE64', got %s", attachment3.Encoding)
+	}
+	if attachment3.FormatType != "text/plain" {
+		t.Errorf("Attachment 3 FormatType: expected 'text/plain', got %s", attachment3.FormatType)
+	}
+	if attachment3.URI != "" {
+		t.Errorf("Attachment 3 URI: expected empty, got %s", attachment3.URI)
+	}
+
+	attachment4 := event.Attachments[3]
+	if attachment4.URI != "https://example.com/custom.doc" {
+		t.Errorf("Attachment 4 URI: expected 'https://example.com/custom.doc', got %s", attachment4.URI)
+	}
+	if attachment4.CustomParams["X-CUSTOM-PARAM"] != "custom-value" {
+		t.Errorf("Attachment 4 Custom Param: expected 'custom-value', got %s", attachment4.CustomParams["X-CUSTOM-PARAM"])
+	}
+}
+
+func TestParseEventMetadata_ContactsAndComments(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-with-contacts-comments
+DTSTART:20240115T100000Z
+SUMMARY:Event with Contacts and Comments
+CONTACT:John Doe <john@example.com>
+CONTACT:Jane Smith, Project Manager
+CONTACT:555-1234
+COMMENT:This is the first comment about the event
+COMMENT:This is a second comment with additional details
+COMMENT:Final comment for the event
+END:VEVENT
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
+	}
+
+	event := parsed.Events[0]
+
+	expectedContacts := []string{
+		"John Doe <john@example.com>",
+		"Jane Smith, Project Manager",
+		"555-1234",
+	}
+
+	if len(event.Contacts) != len(expectedContacts) {
+		t.Fatalf("Expected %d contacts, got %d", len(expectedContacts), len(event.Contacts))
+	}
+
+	for i, expected := range expectedContacts {
+		if event.Contacts[i] != expected {
+			t.Errorf("Contact[%d]: expected %s, got %s", i, expected, event.Contacts[i])
+		}
+	}
+
+	expectedComments := []string{
+		"This is the first comment about the event",
+		"This is a second comment with additional details",
+		"Final comment for the event",
+	}
+
+	if len(event.Comments) != len(expectedComments) {
+		t.Fatalf("Expected %d comments, got %d", len(expectedComments), len(event.Comments))
+	}
+
+	for i, expected := range expectedComments {
+		if event.Comments[i] != expected {
+			t.Errorf("Comment[%d]: expected %s, got %s", i, expected, event.Comments[i])
+		}
+	}
+}
+
+func TestParseEventMetadata_RequestStatus(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-with-request-status
+DTSTART:20240115T100000Z
+SUMMARY:Meeting Request
+REQUEST-STATUS:2.0;Success
+REQUEST-STATUS:3.1;Invalid property name;DTSTART
+REQUEST-STATUS:2.8;Success;Delivered to John Doe
+REQUEST-STATUS:4.0;Event conflict
+END:VEVENT
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
+	}
+
+	event := parsed.Events[0]
+
+	expectedStatuses := []RequestStatus{
+		{Code: "2.0", Description: "Success", ExtraData: ""},
+		{Code: "3.1", Description: "Invalid property name", ExtraData: "DTSTART"},
+		{Code: "2.8", Description: "Success", ExtraData: "Delivered to John Doe"},
+		{Code: "4.0", Description: "Event conflict", ExtraData: ""},
+	}
+
+	if len(event.RequestStatus) != len(expectedStatuses) {
+		t.Fatalf("Expected %d request statuses, got %d", len(expectedStatuses), len(event.RequestStatus))
+	}
+
+	for i, expected := range expectedStatuses {
+		if event.RequestStatus[i].Code != expected.Code {
+			t.Errorf("RequestStatus[%d] Code: expected %s, got %s", i, expected.Code, event.RequestStatus[i].Code)
+		}
+		if event.RequestStatus[i].Description != expected.Description {
+			t.Errorf("RequestStatus[%d] Description: expected %s, got %s", i, expected.Description, event.RequestStatus[i].Description)
+		}
+		if event.RequestStatus[i].ExtraData != expected.ExtraData {
+			t.Errorf("RequestStatus[%d] ExtraData: expected %s, got %s", i, expected.ExtraData, event.RequestStatus[i].ExtraData)
+		}
+	}
+}
+
+func TestParseEventMetadata_Combined(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:comprehensive-event-metadata
+DTSTART:20240115T100000Z
+SUMMARY:Comprehensive Event with All Metadata
+DESCRIPTION:Event with complete metadata
+RELATED-TO;RELTYPE=PARENT:parent-123
+RELATED-TO;RELTYPE=CHILD:child-456
+ATTACH;FMTTYPE=application/pdf:https://example.com/agenda.pdf
+ATTACH;VALUE=BINARY;ENCODING=BASE64:SGVsbG8gV29ybGQ=
+CONTACT:John Doe <john@example.com>
+CONTACT:Meeting Room Manager
+COMMENT:Please bring your laptops
+COMMENT:Parking is available on Level 2
+REQUEST-STATUS:2.0;Successfully scheduled
+END:VEVENT
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
+	}
+
+	event := parsed.Events[0]
+
+	if len(event.RelatedTo) != 2 {
+		t.Errorf("Expected 2 related events, got %d", len(event.RelatedTo))
+	}
+
+	if len(event.Attachments) != 2 {
+		t.Errorf("Expected 2 attachments, got %d", len(event.Attachments))
+	}
+
+	if len(event.Contacts) != 2 {
+		t.Errorf("Expected 2 contacts, got %d", len(event.Contacts))
+	}
+
+	if len(event.Comments) != 2 {
+		t.Errorf("Expected 2 comments, got %d", len(event.Comments))
+	}
+
+	if len(event.RequestStatus) != 1 {
+		t.Errorf("Expected 1 request status, got %d", len(event.RequestStatus))
+	}
+
+	if event.RequestStatus[0].Code != "2.0" {
+		t.Errorf("RequestStatus Code: expected '2.0', got %s", event.RequestStatus[0].Code)
+	}
+}
+
+func TestParseTodoMetadata(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTODO
+UID:todo-with-metadata
+DTSTART:20240115T100000Z
+SUMMARY:Todo with Metadata
+RELATED-TO;RELTYPE=PARENT:parent-todo-123
+ATTACH:https://example.com/requirements.doc
+CONTACT:Project Manager <pm@example.com>
+COMMENT:High priority task
+REQUEST-STATUS:2.0;Task assigned
+END:VTODO
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.Todos) != 1 {
+		t.Fatalf("Expected 1 todo, got %d", len(parsed.Todos))
+	}
+
+	todo := parsed.Todos[0]
+
+	if len(todo.RelatedTo) != 1 {
+		t.Errorf("Expected 1 related todo, got %d", len(todo.RelatedTo))
+	}
+
+	if todo.RelatedTo[0].UID != "parent-todo-123" {
+		t.Errorf("Related UID: expected 'parent-todo-123', got %s", todo.RelatedTo[0].UID)
+	}
+
+	if len(todo.Attachments) != 1 {
+		t.Errorf("Expected 1 attachment, got %d", len(todo.Attachments))
+	}
+
+	if todo.Attachments[0].URI != "https://example.com/requirements.doc" {
+		t.Errorf("Attachment URI: expected 'https://example.com/requirements.doc', got %s", todo.Attachments[0].URI)
+	}
+
+	if len(todo.Contacts) != 1 {
+		t.Errorf("Expected 1 contact, got %d", len(todo.Contacts))
+	}
+
+	if todo.Contacts[0] != "Project Manager <pm@example.com>" {
+		t.Errorf("Contact: expected 'Project Manager <pm@example.com>', got %s", todo.Contacts[0])
+	}
+
+	if len(todo.Comments) != 1 {
+		t.Errorf("Expected 1 comment, got %d", len(todo.Comments))
+	}
+
+	if todo.Comments[0] != "High priority task" {
+		t.Errorf("Comment: expected 'High priority task', got %s", todo.Comments[0])
+	}
+
+	if len(todo.RequestStatus) != 1 {
+		t.Errorf("Expected 1 request status, got %d", len(todo.RequestStatus))
+	}
+}
+
+func TestParseICalendar_TimeZoneWithStandardDaylight(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//Test//EN
+BEGIN:VTIMEZONE
+TZID:America/New_York
+BEGIN:DAYLIGHT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+TZNAME:EDT
+DTSTART:20070311T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+TZNAME:EST
+DTSTART:20071104T020000
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+END:STANDARD
+END:VTIMEZONE
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.TimeZones) != 1 {
+		t.Fatalf("Expected 1 timezone, got %d", len(parsed.TimeZones))
+	}
+
+	tz := parsed.TimeZones[0]
+
+	if tz.TZID != "America/New_York" {
+		t.Errorf("TZID: expected 'America/New_York', got %s", tz.TZID)
+	}
+
+	// Test DAYLIGHT component
+	daylight := tz.DaylightTime
+	if daylight.TZOffsetFrom != "-0500" {
+		t.Errorf("Daylight TZOFFSETFROM: expected '-0500', got %s", daylight.TZOffsetFrom)
+	}
+	if daylight.TZOffsetTo != "-0400" {
+		t.Errorf("Daylight TZOFFSETTO: expected '-0400', got %s", daylight.TZOffsetTo)
+	}
+	if daylight.TZName != "EDT" {
+		t.Errorf("Daylight TZNAME: expected 'EDT', got %s", daylight.TZName)
+	}
+	if daylight.RecurrenceRule != "FREQ=YEARLY;BYMONTH=3;BYDAY=2SU" {
+		t.Errorf("Daylight RRULE: expected 'FREQ=YEARLY;BYMONTH=3;BYDAY=2SU', got %s",
+			daylight.RecurrenceRule)
+	}
+
+	// Test STANDARD component
+	standard := tz.StandardTime
+	if standard.TZOffsetFrom != "-0400" {
+		t.Errorf("Standard TZOFFSETFROM: expected '-0400', got %s", standard.TZOffsetFrom)
+	}
+	if standard.TZOffsetTo != "-0500" {
+		t.Errorf("Standard TZOFFSETTO: expected '-0500', got %s", standard.TZOffsetTo)
+	}
+	if standard.TZName != "EST" {
+		t.Errorf("Standard TZNAME: expected 'EST', got %s", standard.TZName)
+	}
+	if standard.RecurrenceRule != "FREQ=YEARLY;BYMONTH=11;BYDAY=1SU" {
+		t.Errorf("Standard RRULE: expected 'FREQ=YEARLY;BYMONTH=11;BYDAY=1SU', got %s",
+			standard.RecurrenceRule)
+	}
+
+	// Test DTSTART parsing
+	if daylight.DTStart == nil {
+		t.Error("Daylight DTSTART should not be nil")
+	} else {
+		expected := time.Date(2007, 3, 11, 2, 0, 0, 0, time.UTC)
+		if !daylight.DTStart.Equal(expected) {
+			t.Errorf("Daylight DTSTART: expected %v, got %v", expected, *daylight.DTStart)
+		}
+	}
+
+	if standard.DTStart == nil {
+		t.Error("Standard DTSTART should not be nil")
+	} else {
+		expected := time.Date(2007, 11, 4, 2, 0, 0, 0, time.UTC)
+		if !standard.DTStart.Equal(expected) {
+			t.Errorf("Standard DTSTART: expected %v, got %v", expected, *standard.DTStart)
+		}
+	}
+}
+
+func TestParseICalendar_TimeZoneWithRDATEEXDATE(t *testing.T) {
+	icalData := `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//Test//EN
+BEGIN:VTIMEZONE
+TZID:Custom/Zone
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+TZNAME:STD
+DTSTART:20230101T020000
+RDATE:20230301T030000,20230601T030000
+EXDATE:20230401T020000
+COMMENT:Test standard time
+END:STANDARD
+END:VTIMEZONE
+END:VCALENDAR`
+
+	parsed, err := ParseICalendar(icalData)
+	if err != nil {
+		t.Fatalf("ParseICalendar failed: %v", err)
+	}
+
+	if len(parsed.TimeZones) != 1 {
+		t.Fatalf("Expected 1 timezone, got %d", len(parsed.TimeZones))
+	}
+
+	tz := parsed.TimeZones[0]
+	standard := tz.StandardTime
+
+	// Test RDATE parsing
+	if len(standard.RecurrenceDates) != 2 {
+		t.Errorf("Expected 2 recurrence dates, got %d", len(standard.RecurrenceDates))
+	} else {
+		expected1 := time.Date(2023, 3, 1, 3, 0, 0, 0, time.UTC)
+		expected2 := time.Date(2023, 6, 1, 3, 0, 0, 0, time.UTC)
+
+		found1 := false
+		found2 := false
+		for _, rdate := range standard.RecurrenceDates {
+			if rdate.Equal(expected1) {
+				found1 = true
+			}
+			if rdate.Equal(expected2) {
+				found2 = true
+			}
+		}
+
+		if !found1 {
+			t.Errorf("Expected RDATE %v not found", expected1)
+		}
+		if !found2 {
+			t.Errorf("Expected RDATE %v not found", expected2)
+		}
+	}
+
+	// Test EXDATE parsing
+	if len(standard.ExceptionDates) != 1 {
+		t.Errorf("Expected 1 exception date, got %d", len(standard.ExceptionDates))
+	} else {
+		expected := time.Date(2023, 4, 1, 2, 0, 0, 0, time.UTC)
+		if !standard.ExceptionDates[0].Equal(expected) {
+			t.Errorf("EXDATE: expected %v, got %v", expected, standard.ExceptionDates[0])
+		}
+	}
+
+	// Test COMMENT parsing
+	if len(standard.Comment) != 1 {
+		t.Errorf("Expected 1 comment, got %d", len(standard.Comment))
+	} else if standard.Comment[0] != "Test standard time" {
+		t.Errorf("Comment: expected 'Test standard time', got %s", standard.Comment[0])
+	}
 }

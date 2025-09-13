@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,6 +31,13 @@ type CalDAVClient struct {
 	autoCorrectXML    bool
 	autoParsing       bool
 	connectionMetrics *ConnectionMetrics
+	cache             *ResponseCache
+	// Sync optimization fields
+	etagCache      *ETagCache
+	preferDefaults *PreferHeader
+	batchSize      int
+	deltaStates    map[string]*DeltaSyncState
+	syncMu         sync.RWMutex
 }
 
 // NewClient creates a new CalDAV client for iCloud.
@@ -46,7 +55,17 @@ func NewClient(username, password string) *CalDAVClient {
 		username:   username,
 		password:   password,
 		authHeader: fmt.Sprintf("Basic %s", encodedAuth),
-		logger:     &noopLogger{},
+		// Initialize sync optimization fields
+		etagCache: &ETagCache{
+			entries: make(map[string]*ETagEntry),
+			maxAge:  15 * time.Minute,
+		},
+		preferDefaults: &PreferHeader{
+			ReturnMinimal: true,
+		},
+		batchSize:   50,
+		deltaStates: make(map[string]*DeltaSyncState),
+		logger:      &noopLogger{},
 	}
 }
 
@@ -72,7 +91,23 @@ func (c *CalDAVClient) GetConnectionMetrics() *ConnectionMetrics {
 	return c.connectionMetrics
 }
 
-func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, body []byte) (*http.Response, error) {
+// SetBaseURL sets the base URL for the CalDAV server.
+func (c *CalDAVClient) SetBaseURL(url string) {
+	c.baseURL = url
+}
+
+// GetBaseURL returns the base URL for the CalDAV server.
+func (c *CalDAVClient) GetBaseURL() string {
+	return c.baseURL
+}
+
+// GetHTTPClient returns the underlying HTTP client.
+func (c *CalDAVClient) GetHTTPClient() *http.Client {
+	return c.httpClient
+}
+
+// prepareRequest creates and configures an HTTP request with common headers.
+func (c *CalDAVClient) prepareRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
 	var url string
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		url = path
@@ -80,7 +115,30 @@ func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, 
 		url = c.baseURL + path
 	}
 
-	c.logger.Debug("PROPFIND %s (depth: %s)", url, depth)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		c.logger.Error("Failed to create %s request: %v", method, err)
+		return nil, wrapErrorWithType("request.create", ErrorTypeInvalidRequest, err)
+	}
+
+	req.Header.Set("Authorization", c.authHeader)
+	req.Header.Set("User-Agent", userAgent)
+
+	return req, nil
+}
+
+// setXMLHeaders sets common XML request headers.
+func (c *CalDAVClient) setXMLHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
+}
+
+// setDepthHeader sets the Depth header for a request.
+func (c *CalDAVClient) setDepthHeader(req *http.Request, depth string) {
+	req.Header.Set("Depth", depth)
+}
+
+func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, body []byte) (*http.Response, error) {
+	c.logger.Debug("PROPFIND %s (depth: %s)", path, depth)
 
 	if c.xmlValidator != nil {
 		result, err := c.xmlValidator.ValidateCalDAVRequest(body)
@@ -105,16 +163,13 @@ func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, 
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "PROPFIND", url, bytes.NewReader(body))
+	req, err := c.prepareRequest(ctx, "PROPFIND", path, bytes.NewReader(body))
 	if err != nil {
-		c.logger.Error("Failed to create PROPFIND request: %v", err)
-		return nil, wrapErrorWithType("propfind.create", ErrorTypeInvalidRequest, err)
+		return nil, err
 	}
 
-	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
-	req.Header.Set("Depth", depth)
+	c.setXMLHeaders(req)
+	c.setDepthHeader(req, depth)
 
 	c.logRequest(req)
 
@@ -125,20 +180,13 @@ func (c *CalDAVClient) propfind(ctx context.Context, path string, depth string, 
 	}
 
 	c.logResponse(resp)
-	c.logger.Info("PROPFIND %s completed with status %d", url, resp.StatusCode)
+	c.logger.Info("PROPFIND %s completed with status %d", path, resp.StatusCode)
 
 	return resp, nil
 }
 
 func (c *CalDAVClient) report(ctx context.Context, path string, body []byte) (*http.Response, error) {
-	var url string
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		url = path
-	} else {
-		url = c.baseURL + path
-	}
-
-	c.logger.Debug("REPORT %s", url)
+	c.logger.Debug("REPORT %s", path)
 
 	if c.xmlValidator != nil {
 		result, err := c.xmlValidator.ValidateCalDAVRequest(body)
@@ -163,16 +211,13 @@ func (c *CalDAVClient) report(ctx context.Context, path string, body []byte) (*h
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "REPORT", url, bytes.NewReader(body))
+	req, err := c.prepareRequest(ctx, "REPORT", path, bytes.NewReader(body))
 	if err != nil {
-		c.logger.Error("Failed to create REPORT request: %v", err)
-		return nil, wrapErrorWithType("report.create", ErrorTypeInvalidRequest, err)
+		return nil, err
 	}
 
-	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
-	req.Header.Set("Depth", "1")
+	c.setXMLHeaders(req)
+	c.setDepthHeader(req, "1")
 
 	c.logRequest(req)
 
@@ -183,7 +228,7 @@ func (c *CalDAVClient) report(ctx context.Context, path string, body []byte) (*h
 	}
 
 	c.logResponse(resp)
-	c.logger.Info("REPORT %s completed with status %d", url, resp.StatusCode)
+	c.logger.Info("REPORT %s completed with status %d", path, resp.StatusCode)
 
 	return resp, nil
 }

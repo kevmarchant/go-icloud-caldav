@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"time"
 )
 
 type LogLevel int
@@ -157,6 +158,18 @@ func WithConnectionMetrics(metrics *ConnectionMetrics) ClientOption {
 				logger:    c.logger,
 			}
 		}
+	}
+}
+
+func WithCache(defaultTTL time.Duration, maxEntries int) ClientOption {
+	return func(c *CalDAVClient) {
+		c.cache = NewResponseCache(defaultTTL, maxEntries)
+	}
+}
+
+func WithExistingCache(cache *ResponseCache) ClientOption {
+	return func(c *CalDAVClient) {
+		c.cache = cache
 	}
 }
 

@@ -15,7 +15,6 @@ type ParsedCalendarData struct {
 	Method           string
 	Events           []ParsedEvent
 	Todos            []ParsedTodo
-	Journals         []ParsedJournal
 	FreeBusy         []ParsedFreeBusy
 	TimeZones        []ParsedTimeZone
 	Alarms           []ParsedAlarm
@@ -39,7 +38,14 @@ type ParsedEvent struct {
 	Attendees        []ParsedAttendee
 	RecurrenceID     *time.Time
 	RecurrenceRule   string
+	RecurrenceDates  []time.Time
 	ExceptionDates   []time.Time
+	ExceptionRule    string
+	RelatedTo        []RelatedEvent
+	Attachments      []Attachment
+	Contacts         []string
+	Comments         []string
+	RequestStatus    []RequestStatus
 	Created          *time.Time
 	LastModified     *time.Time
 	Sequence         int
@@ -64,27 +70,16 @@ type ParsedTodo struct {
 	PercentComplete  int
 	Priority         int
 	Categories       []string
+	RelatedTo        []RelatedEvent
+	Attachments      []Attachment
+	Contacts         []string
+	Comments         []string
+	RequestStatus    []RequestStatus
 	Created          *time.Time
 	LastModified     *time.Time
 	Sequence         int
 	Class            string
 	URL              string
-	CustomProperties map[string]string
-}
-
-// ParsedJournal represents a parsed VJOURNAL component.
-type ParsedJournal struct {
-	UID              string
-	DTStamp          *time.Time
-	DTStart          *time.Time
-	Summary          string
-	Description      string
-	Status           string
-	Categories       []string
-	Created          *time.Time
-	LastModified     *time.Time
-	Sequence         int
-	Class            string
 	CustomProperties map[string]string
 }
 
@@ -110,11 +105,31 @@ type ParsedTimeZone struct {
 
 // ParsedTimeZoneComponent represents standard or daylight time information.
 type ParsedTimeZoneComponent struct {
-	DTStart        *time.Time
-	TZOffsetFrom   string
-	TZOffsetTo     string
-	TZName         string
-	RecurrenceRule string
+	DTStart          *time.Time
+	TZOffsetFrom     string
+	TZOffsetTo       string
+	TZName           string
+	RecurrenceRule   string
+	RecurrenceDates  []time.Time
+	ExceptionDates   []time.Time
+	Comment          []string
+	CustomProperties map[string]string
+}
+
+// TimeZoneTransition represents a timezone transition point.
+type TimeZoneTransition struct {
+	DateTime     time.Time
+	OffsetFrom   time.Duration
+	OffsetTo     time.Duration
+	Abbreviation string
+	IsDST        bool
+}
+
+// TimeZoneInfo provides timezone calculation and DST transition information.
+type TimeZoneInfo struct {
+	TZID        string
+	Location    *time.Location
+	Transitions []TimeZoneTransition
 }
 
 // ParsedAlarm represents a parsed VALARM component.
@@ -169,17 +184,98 @@ type FreeBusyPeriod struct {
 	FBType string
 }
 
+// RelatedEvent represents event relationship information from RELATED-TO property.
+type RelatedEvent struct {
+	UID          string
+	RelationType string
+}
+
+// Attachment represents file attachment information from ATTACH property.
+type Attachment struct {
+	URI          string
+	Encoding     string
+	Value        string
+	FormatType   string
+	Size         int
+	Filename     string
+	CustomParams map[string]string
+}
+
+// RequestStatus represents meeting request status information from REQUEST-STATUS property.
+type RequestStatus struct {
+	Code        string
+	Description string
+	ExtraData   string
+}
+
+// CalendarQuota represents quota information for a calendar.
+type CalendarQuota struct {
+	QuotaUsedBytes      int64
+	QuotaAvailableBytes int64
+}
+
+// Principal represents a CalDAV principal (user, group, or resource).
+type Principal struct {
+	Href        string
+	DisplayName string
+	Email       string
+	Type        string // "user", "group", "resource"
+}
+
+// ACE represents an Access Control Entry.
+type ACE struct {
+	Principal Principal
+	Grant     []string // List of granted privileges
+	Deny      []string // List of denied privileges
+	Protected bool     // Whether this ACE is protected from deletion
+	Inherited string   // Inherited from which resource (if any)
+}
+
+// ACL represents an Access Control List.
+type ACL struct {
+	ACEs []ACE
+}
+
+// PrivilegeSet represents a set of privileges.
+type PrivilegeSet struct {
+	Read                        bool
+	Write                       bool
+	WriteProperties             bool
+	WriteContent                bool
+	ReadCurrentUserPrivilegeSet bool
+	ReadACL                     bool
+	WriteACL                    bool
+	All                         bool
+	CalendarAccess              bool
+	ReadFreeBusy                bool
+	ScheduleInbox               bool
+	ScheduleOutbox              bool
+	ScheduleSend                bool
+	ScheduleDeliver             bool
+}
+
 // Calendar represents a CalDAV calendar collection with its properties.
 type Calendar struct {
-	Name                string
-	DisplayName         string
-	Href                string
-	Description         string
-	Color               string
-	SupportedComponents []string
-	ResourceType        []string
-	CTag                string
-	ETag                string
+	Name                    string
+	DisplayName             string
+	Href                    string
+	Description             string
+	Color                   string
+	SupportedComponents     []string
+	ResourceType            []string
+	CTag                    string
+	ETag                    string
+	CalendarTimeZone        string
+	MaxResourceSize         int64
+	MinDateTime             *time.Time
+	MaxDateTime             *time.Time
+	MaxInstances            int
+	MaxAttendeesPerInstance int
+	CurrentUserPrivilegeSet []string
+	Source                  string
+	SupportedReports        []string
+	Quota                   CalendarQuota
+	ACL                     ACL
 }
 
 type CalendarObject struct {
@@ -258,6 +354,21 @@ type PropstatProp struct {
 	CurrentUserPrincipal          string
 	CalendarHomeSet               string
 	Owner                         string
+	CalendarTimeZone              string
+	MaxResourceSize               int64
+	MinDateTime                   string
+	MaxDateTime                   string
+	MaxInstances                  int
+	MaxAttendeesPerInstance       int
+	CurrentUserPrivilegeSet       []string
+	Source                        string
+	SupportedReports              []string
+	QuotaUsedBytes                int64
+	QuotaAvailableBytes           int64
+	ContentType                   string
+	ContentLength                 int64
+	CreationDate                  string
+	LastModified                  string
 }
 
 // CalendarHomeSet represents the calendar home collection URL.
