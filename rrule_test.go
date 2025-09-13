@@ -804,3 +804,225 @@ func TestGetNthWeekdayInMonth(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandEventWithInterval(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         ParsedEvent
+		start         time.Time
+		end           time.Time
+		expectedDates []time.Time
+	}{
+		{
+			name: "Biweekly Saturday (INTERVAL=2 with BYDAY)",
+			event: ParsedEvent{
+				Summary:        "Biweekly Event",
+				DTStart:        timePtr(time.Date(2024, 9, 21, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA",
+			},
+			start: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 21, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 5, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 19, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 11, 2, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 11, 16, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 11, 30, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "Every 3 days (DAILY with INTERVAL=3)",
+			event: ParsedEvent{
+				Summary:        "Every 3 Days",
+				DTStart:        timePtr(time.Date(2024, 9, 1, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=DAILY;INTERVAL=3",
+			},
+			start: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2024, 9, 15, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 1, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 4, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 7, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 10, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 13, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "Bimonthly (MONTHLY with INTERVAL=2)",
+			event: ParsedEvent{
+				Summary:        "Bimonthly Event",
+				DTStart:        timePtr(time.Date(2024, 9, 15, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=MONTHLY;INTERVAL=2",
+			},
+			start: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2025, 4, 1, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 15, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 11, 15, 10, 0, 0, 0, time.UTC),
+				time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
+				time.Date(2025, 3, 15, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "Biennial (YEARLY with INTERVAL=2)",
+			event: ParsedEvent{
+				Summary:        "Biennial Event",
+				DTStart:        timePtr(time.Date(2024, 9, 15, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=YEARLY;INTERVAL=2",
+			},
+			start: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 15, 10, 0, 0, 0, time.UTC),
+				time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC),
+				time.Date(2028, 9, 15, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "Biweekly Tuesday and Thursday (INTERVAL=2 with multiple BYDAY)",
+			event: ParsedEvent{
+				Summary:        "Biweekly Multi-day",
+				DTStart:        timePtr(time.Date(2024, 9, 3, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH",
+			},
+			start: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2024, 10, 16, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 3, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 5, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 17, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 19, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 1, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 3, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 15, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "Weekly with INTERVAL=3 and BYDAY",
+			event: ParsedEvent{
+				Summary:        "Every 3 weeks on Monday",
+				DTStart:        timePtr(time.Date(2024, 9, 2, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=WEEKLY;INTERVAL=3;BYDAY=MO",
+			},
+			start: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:   time.Date(2024, 11, 1, 0, 0, 0, 0, time.UTC),
+			expectedDates: []time.Time{
+				time.Date(2024, 9, 2, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 9, 23, 10, 0, 0, 0, time.UTC),
+				time.Date(2024, 10, 14, 10, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			occurrences, err := ExpandEvent(tt.event, tt.start, tt.end)
+			if err != nil {
+				t.Fatalf("ExpandEvent() error = %v", err)
+			}
+
+			if len(occurrences) != len(tt.expectedDates) {
+				t.Errorf("ExpandEvent() returned %d events, want %d", len(occurrences), len(tt.expectedDates))
+				for i, occ := range occurrences {
+					if occ.DTStart != nil {
+						t.Logf("  Got[%d]: %v (%s)", i, occ.DTStart.Format("2006-01-02"), occ.DTStart.Weekday())
+					}
+				}
+				t.Logf("Expected dates:")
+				for i, date := range tt.expectedDates {
+					t.Logf("  Expected[%d]: %v (%s)", i, date.Format("2006-01-02"), date.Weekday())
+				}
+				return
+			}
+
+			for i, expectedDate := range tt.expectedDates {
+				if i >= len(occurrences) {
+					t.Errorf("Missing occurrence %d: expected %v", i, expectedDate.Format("2006-01-02"))
+					continue
+				}
+				if occurrences[i].DTStart == nil {
+					t.Errorf("Occurrence %d has nil DTStart", i)
+					continue
+				}
+				if !occurrences[i].DTStart.Equal(expectedDate) {
+					t.Errorf("Occurrence %d: got %v (%s), want %v (%s)",
+						i,
+						occurrences[i].DTStart.Format("2006-01-02"),
+						occurrences[i].DTStart.Weekday(),
+						expectedDate.Format("2006-01-02"),
+						expectedDate.Weekday())
+				}
+			}
+		})
+	}
+}
+
+func TestExpandEventWithIntervalAndLimits(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         ParsedEvent
+		start         time.Time
+		end           time.Time
+		expectedCount int
+	}{
+		{
+			name: "Biweekly with COUNT limit",
+			event: ParsedEvent{
+				Summary:        "Biweekly Limited",
+				DTStart:        timePtr(time.Date(2024, 9, 7, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA;COUNT=5",
+			},
+			start:         time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:           time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			expectedCount: 5,
+		},
+		{
+			name: "Daily INTERVAL=3 with UNTIL date",
+			event: ParsedEvent{
+				Summary:        "Every 3 days until Nov",
+				DTStart:        timePtr(time.Date(2024, 9, 1, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=DAILY;INTERVAL=3;UNTIL=20241101T100000Z",
+			},
+			start:         time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:           time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
+			expectedCount: 21,
+		},
+		{
+			name: "Monthly INTERVAL=2 with EXDATE",
+			event: ParsedEvent{
+				Summary:        "Bimonthly with exclusion",
+				DTStart:        timePtr(time.Date(2024, 9, 15, 10, 0, 0, 0, time.UTC)),
+				RecurrenceRule: "FREQ=MONTHLY;INTERVAL=2",
+				ExceptionDates: []time.Time{
+					time.Date(2024, 11, 15, 10, 0, 0, 0, time.UTC),
+				},
+			},
+			start:         time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			end:           time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC),
+			expectedCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			occurrences, err := ExpandEvent(tt.event, tt.start, tt.end)
+			if err != nil {
+				t.Fatalf("ExpandEvent() error = %v", err)
+			}
+
+			if len(occurrences) != tt.expectedCount {
+				t.Errorf("ExpandEvent() returned %d events, want %d", len(occurrences), tt.expectedCount)
+				for i, occ := range occurrences {
+					if occ.DTStart != nil {
+						t.Logf("  Got[%d]: %v", i, occ.DTStart.Format("2006-01-02"))
+					}
+				}
+			}
+		})
+	}
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}

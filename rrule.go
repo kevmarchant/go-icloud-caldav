@@ -110,27 +110,28 @@ type expandEventState struct {
 
 func buildExclusionMap(event ParsedEvent, end time.Time) map[string]bool {
 	excludeMap := make(map[string]bool)
-	if event.ExceptionRule == "" || event.DTStart == nil {
-		return excludeMap
+
+	for _, exDate := range event.ExceptionDates {
+		excludeMap[exDate.Format("20060102T150405Z")] = true
 	}
 
-	exRule, err := ParseRRule(event.ExceptionRule)
-	if err != nil || exRule == nil {
-		return excludeMap
-	}
+	if event.ExceptionRule != "" && event.DTStart != nil {
+		exRule, err := ParseRRule(event.ExceptionRule)
+		if err == nil && exRule != nil {
+			current := *event.DTStart
+			maxIterations := 10000
 
-	current := *event.DTStart
-	maxIterations := 10000
-
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		if current.After(end.AddDate(1, 0, 0)) {
-			break
+			for iteration := 0; iteration < maxIterations; iteration++ {
+				if current.After(end.AddDate(1, 0, 0)) {
+					break
+				}
+				if exRule.Until != nil && current.After(*exRule.Until) {
+					break
+				}
+				excludeMap[current.Format("20060102T150405Z")] = true
+				current = nextOccurrence(current, exRule)
+			}
 		}
-		if exRule.Until != nil && current.After(*exRule.Until) {
-			break
-		}
-		excludeMap[current.Format("20060102T150405Z")] = true
-		current = nextOccurrence(current, exRule)
 	}
 
 	return excludeMap
@@ -349,25 +350,34 @@ func nextWeeklyOccurrence(current time.Time, rule *RRule) time.Time {
 		return current.AddDate(0, 0, 7*rule.Interval)
 	}
 
-	// Parse BYDAY values
 	byDayParts := parseByDay(rule.ByDay)
 	if len(byDayParts) == 0 {
 		return current.AddDate(0, 0, 7*rule.Interval)
 	}
 
-	// Find next matching weekday
-	for days := 1; days <= 7*rule.Interval; days++ {
-		candidate := current.AddDate(0, 0, days)
-		candidateWeekday := candidate.Weekday()
+	currentWeekStart := current.AddDate(0, 0, -int(current.Weekday()))
 
-		for _, part := range byDayParts {
-			if weekdayToInt(part.Weekday) == candidateWeekday {
-				return candidate
+	for weeks := 0; weeks <= rule.Interval; weeks++ {
+		weekStart := currentWeekStart.AddDate(0, 0, weeks*7)
+
+		for days := 0; days < 7; days++ {
+			candidate := weekStart.AddDate(0, 0, days)
+
+			if candidate.After(current) {
+				candidateWeekday := candidate.Weekday()
+
+				for _, part := range byDayParts {
+					if weekdayToInt(part.Weekday) == candidateWeekday {
+						if weeks == 0 || weeks == rule.Interval {
+							return candidate
+						}
+						break
+					}
+				}
 			}
 		}
 	}
 
-	// Fallback
 	return current.AddDate(0, 0, 7*rule.Interval)
 }
 

@@ -4,7 +4,7 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/kevmarchant/go-icloud-caldav.svg)](https://pkg.go.dev/github.com/kevmarchant/go-icloud-caldav)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kevmarchant/go-icloud-caldav)](https://goreportcard.com/report/github.com/kevmarchant/go-icloud-caldav)
-[![Test Coverage](https://img.shields.io/badge/coverage-84.3%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
+[![Test Coverage](https://img.shields.io/badge/coverage-84.5%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
 [![Code Quality](https://img.shields.io/badge/gocyclo-A--grade-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -709,6 +709,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 Recent highlights:
 
+- v0.2.3 - Fixed critical RRULE INTERVAL bug and EXDATE support for recurring events
 - v0.2.2 - Code quality A- grade, 75% complexity reduction, performance optimisations, critical fixes
 - v0.2.1 - Major feature expansion: caching, RRULE parsing, timezone support, ACLs, attachments
 - v0.1.2 - Major feature release: parallel operations, sync tokens, iCal parser, XML validation

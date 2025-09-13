@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-09-13
+
+### Fixed
+
+- **RRULE INTERVAL Bug Fix**
+  - Fixed critical bug where INTERVAL parameter was not correctly applied in WEEKLY recurrence with BYDAY
+  - Events with `FREQ=WEEKLY;INTERVAL=2;BYDAY=SA` now correctly expand as biweekly instead of weekly
+  - Fixed handling of multiple BYDAY values with INTERVAL > 1 (e.g., `BYDAY=TU,TH`)
+  - INTERVAL now works correctly for all frequencies (DAILY, WEEKLY, MONTHLY, YEARLY)
+
+- **EXDATE Support**
+  - Fixed bug where EXDATE (exception dates) were not being excluded from recurring event expansion
+  - Exception dates are now properly respected in all recurrence patterns
+  - Both EXDATE and EXRULE are now correctly handled in the exclusion map
+
+### Added
+
+- Comprehensive test coverage for INTERVAL parameter across all recurrence frequencies
+- Tests for INTERVAL with COUNT limits
+- Tests for INTERVAL with UNTIL dates
+- Tests for INTERVAL with exception dates (EXDATE)
+- Tests for multiple BYDAY values with INTERVAL
+
+### Improved
+
+- Better handling of week boundaries in weekly recurrence calculations
+- More robust recurrence expansion logic for complex patterns
+- Test coverage maintained at 84.5%
+
 ## [0.2.2] - 2025-09-13
 
 ### Improved
