@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-09-13
+
+### Fixed
+
+- Fixed race condition in `TestBatchProcessor_ExecuteBatch` test
+- Updated deprecated GitHub Actions release workflow from `actions/create-release@v1` to `softprops/action-gh-release@v1`
+
 ## [0.2.0] - 2025-09-13
 
 ### Added

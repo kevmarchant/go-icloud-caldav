@@ -55,7 +55,7 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 - 🔍 **Advanced Filtering** - Nested component filters, text matching, time ranges
 - 📈 **Metrics Collection** - Track connection reuse, retry attempts, and performance
 
-### New in v0.2.0
+### New in v0.2.1
 
 - 🗄️ **Response Caching** - Intelligent caching with TTL and statistics
 - 🔄 **RRULE Parsing** - Native recurrence rule parsing and expansion
@@ -700,7 +700,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 Recent highlights:
 
-- v0.2.0 - Major feature expansion: caching, RRULE parsing, timezone support, ACLs, attachments
+- v0.2.1 - Major feature expansion: caching, RRULE parsing, timezone support, ACLs, attachments
 - v0.1.2 - Major feature release: parallel operations, sync tokens, iCal parser, XML validation
 - v0.1.1 - Fixed CI/CD issues, improved error handling
 - v0.1.0 - Initial production-ready release with full iCloud support

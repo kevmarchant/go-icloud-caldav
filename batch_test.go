@@ -4,14 +4,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestBatchProcessor_ExecuteBatch(t *testing.T) {
-	requestCount := 0
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(207)
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
@@ -62,8 +63,8 @@ func TestBatchProcessor_ExecuteBatch(t *testing.T) {
 		}
 	}
 
-	if requestCount != 4 {
-		t.Errorf("expected 4 HTTP requests, got %d", requestCount)
+	if atomic.LoadInt32(&requestCount) != 4 {
+		t.Errorf("expected 4 HTTP requests, got %d", atomic.LoadInt32(&requestCount))
 	}
 }
 
