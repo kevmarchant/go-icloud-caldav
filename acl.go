@@ -177,39 +177,33 @@ func ParsePrivilegeSet(privileges []string) PrivilegeSet {
 	privSet := PrivilegeSet{}
 
 	for _, priv := range privileges {
-		switch strings.ToLower(priv) {
-		case "read":
-			privSet.Read = true
-		case "write":
-			privSet.Write = true
-		case "write-properties":
-			privSet.WriteProperties = true
-		case "write-content":
-			privSet.WriteContent = true
-		case "read-current-user-privilege-set":
-			privSet.ReadCurrentUserPrivilegeSet = true
-		case "read-acl":
-			privSet.ReadACL = true
-		case "write-acl":
-			privSet.WriteACL = true
-		case "all":
-			privSet.All = true
-		case "calendar-access":
-			privSet.CalendarAccess = true
-		case "read-free-busy":
-			privSet.ReadFreeBusy = true
-		case "schedule-inbox":
-			privSet.ScheduleInbox = true
-		case "schedule-outbox":
-			privSet.ScheduleOutbox = true
-		case "schedule-send":
-			privSet.ScheduleSend = true
-		case "schedule-deliver":
-			privSet.ScheduleDeliver = true
-		}
+		setPrivilege(&privSet, strings.ToLower(priv))
 	}
 
 	return privSet
+}
+
+func setPrivilege(privSet *PrivilegeSet, priv string) {
+	privilegeSetters := map[string]func(*PrivilegeSet){
+		"read":                            func(p *PrivilegeSet) { p.Read = true },
+		"write":                           func(p *PrivilegeSet) { p.Write = true },
+		"write-properties":                func(p *PrivilegeSet) { p.WriteProperties = true },
+		"write-content":                   func(p *PrivilegeSet) { p.WriteContent = true },
+		"read-current-user-privilege-set": func(p *PrivilegeSet) { p.ReadCurrentUserPrivilegeSet = true },
+		"read-acl":                        func(p *PrivilegeSet) { p.ReadACL = true },
+		"write-acl":                       func(p *PrivilegeSet) { p.WriteACL = true },
+		"all":                             func(p *PrivilegeSet) { p.All = true },
+		"calendar-access":                 func(p *PrivilegeSet) { p.CalendarAccess = true },
+		"read-free-busy":                  func(p *PrivilegeSet) { p.ReadFreeBusy = true },
+		"schedule-inbox":                  func(p *PrivilegeSet) { p.ScheduleInbox = true },
+		"schedule-outbox":                 func(p *PrivilegeSet) { p.ScheduleOutbox = true },
+		"schedule-send":                   func(p *PrivilegeSet) { p.ScheduleSend = true },
+		"schedule-deliver":                func(p *PrivilegeSet) { p.ScheduleDeliver = true },
+	}
+
+	if setter, ok := privilegeSetters[priv]; ok {
+		setter(privSet)
+	}
 }
 
 // ToStringSlice converts a PrivilegeSet to a slice of privilege strings.

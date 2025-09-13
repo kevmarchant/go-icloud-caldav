@@ -40,62 +40,68 @@ END:VCALENDAR`
 		t.Fatal("ParseICalendar returned nil")
 	}
 
-	if parsed.Version != "2.0" {
-		t.Errorf("Version: expected 2.0, got %s", parsed.Version)
-	}
-
-	if parsed.ProdID != "-//Test//Test//EN" {
-		t.Errorf("ProdID: expected -//Test//Test//EN, got %s", parsed.ProdID)
-	}
-
-	if parsed.CalScale != "GREGORIAN" {
-		t.Errorf("CalScale: expected GREGORIAN, got %s", parsed.CalScale)
-	}
-
-	if parsed.Method != "PUBLISH" {
-		t.Errorf("Method: expected PUBLISH, got %s", parsed.Method)
-	}
+	validateBasicCalendarProperties(t, parsed)
 
 	if len(parsed.Events) != 1 {
 		t.Fatalf("Expected 1 event, got %d", len(parsed.Events))
 	}
 
-	event := parsed.Events[0]
+	validateBasicEvent(t, parsed.Events[0])
+}
 
-	if event.UID != "test-uid-123" {
-		t.Errorf("UID: expected test-uid-123, got %s", event.UID)
+func validateBasicCalendarProperties(t *testing.T, parsed *ParsedCalendarData) {
+	calendarFields := []struct {
+		name     string
+		expected string
+		actual   string
+	}{
+		{"Version", "2.0", parsed.Version},
+		{"ProdID", "-//Test//Test//EN", parsed.ProdID},
+		{"CalScale", "GREGORIAN", parsed.CalScale},
+		{"Method", "PUBLISH", parsed.Method},
 	}
 
-	if event.Summary != "Test Meeting" {
-		t.Errorf("Summary: expected Test Meeting, got %s", event.Summary)
+	for _, field := range calendarFields {
+		if field.actual != field.expected {
+			t.Errorf("%s: expected %s, got %s", field.name, field.expected, field.actual)
+		}
+	}
+}
+
+func validateBasicEvent(t *testing.T, event ParsedEvent) {
+	eventStringFields := []struct {
+		name     string
+		expected string
+		actual   string
+	}{
+		{"UID", "test-uid-123", event.UID},
+		{"Summary", "Test Meeting", event.Summary},
+		{"Description", "This is a test meeting", event.Description},
+		{"Location", "Conference Room A", event.Location},
+		{"Status", "CONFIRMED", event.Status},
+		{"Transparency", "OPAQUE", event.Transparency},
+		{"Class", "PUBLIC", event.Class},
 	}
 
-	if event.Description != "This is a test meeting" {
-		t.Errorf("Description: expected 'This is a test meeting', got %s", event.Description)
+	for _, field := range eventStringFields {
+		if field.actual != field.expected {
+			t.Errorf("%s: expected %s, got %s", field.name, field.expected, field.actual)
+		}
 	}
 
-	if event.Location != "Conference Room A" {
-		t.Errorf("Location: expected 'Conference Room A', got %s", event.Location)
+	eventIntFields := []struct {
+		name     string
+		expected int
+		actual   int
+	}{
+		{"Sequence", 0, event.Sequence},
+		{"Priority", 5, event.Priority},
 	}
 
-	if event.Status != "CONFIRMED" {
-		t.Errorf("Status: expected CONFIRMED, got %s", event.Status)
-	}
-
-	if event.Transparency != "OPAQUE" {
-		t.Errorf("Transparency: expected OPAQUE, got %s", event.Transparency)
-	}
-
-	if event.Sequence != 0 {
-		t.Errorf("Sequence: expected 0, got %d", event.Sequence)
-	}
-
-	if event.Priority != 5 {
-		t.Errorf("Priority: expected 5, got %d", event.Priority)
-	}
-
-	if event.Class != "PUBLIC" {
-		t.Errorf("Class: expected PUBLIC, got %s", event.Class)
+	for _, field := range eventIntFields {
+		if field.actual != field.expected {
+			t.Errorf("%s: expected %d, got %d", field.name, field.expected, field.actual)
+		}
 	}
 
 	expectedStart, _ := time.Parse("20060102T150405Z", "20240115T100000Z")
@@ -1346,6 +1352,80 @@ func TestParseOrganizer_EdgeCases(t *testing.T) {
 	}
 }
 
+func verifyTodoStringProperties(t *testing.T, todo *ParsedTodo) {
+	expectedStrings := map[string]string{
+		"UID":         "comprehensive-todo",
+		"Summary":     "Comprehensive Todo Task",
+		"Description": "This is a detailed todo description",
+		"Status":      "COMPLETED",
+		"Class":       "CONFIDENTIAL",
+		"URL":         "https://example.com/todo/123",
+	}
+
+	actualStrings := map[string]string{
+		"UID":         todo.UID,
+		"Summary":     todo.Summary,
+		"Description": todo.Description,
+		"Status":      todo.Status,
+		"Class":       todo.Class,
+		"URL":         todo.URL,
+	}
+
+	for field, expected := range expectedStrings {
+		if actual := actualStrings[field]; actual != expected {
+			t.Errorf("%s: expected '%s', got '%s'", field, expected, actual)
+		}
+	}
+}
+
+func verifyTodoIntegerProperties(t *testing.T, todo *ParsedTodo) {
+	expectedInts := map[string]int{
+		"PercentComplete": 100,
+		"Priority":        1,
+		"Sequence":        3,
+	}
+
+	actualInts := map[string]int{
+		"PercentComplete": todo.PercentComplete,
+		"Priority":        todo.Priority,
+		"Sequence":        todo.Sequence,
+	}
+
+	for field, expected := range expectedInts {
+		if actual := actualInts[field]; actual != expected {
+			t.Errorf("%s: expected %d, got %d", field, expected, actual)
+		}
+	}
+}
+
+func verifyTodoTimeProperties(t *testing.T, todo *ParsedTodo) {
+	expectedTimes := map[string]string{
+		"DTStamp":      "20240101T120000Z",
+		"DTStart":      "20240115T090000Z",
+		"Due":          "20240120T170000Z",
+		"Completed":    "20240118T160000Z",
+		"Created":      "20240101T080000Z",
+		"LastModified": "20240118T160000Z",
+	}
+
+	actualTimes := map[string]*time.Time{
+		"DTStamp":      todo.DTStamp,
+		"DTStart":      todo.DTStart,
+		"Due":          todo.Due,
+		"Completed":    todo.Completed,
+		"Created":      todo.Created,
+		"LastModified": todo.LastModified,
+	}
+
+	for field, expectedStr := range expectedTimes {
+		expectedTime, _ := time.Parse("20060102T150405Z", expectedStr)
+		actualTime := actualTimes[field]
+		if actualTime == nil || !actualTime.Equal(expectedTime) {
+			t.Errorf("%s: expected %v, got %v", field, expectedTime, actualTime)
+		}
+	}
+}
+
 func TestHandleTodoProperty_EdgeCases(t *testing.T) {
 	icalData := `BEGIN:VCALENDAR
 VERSION:2.0
@@ -1382,82 +1462,24 @@ END:VCALENDAR`
 
 	todo := parsed.Todos[0]
 
-	// Test all basic string properties
-	if todo.UID != "comprehensive-todo" {
-		t.Errorf("UID: expected 'comprehensive-todo', got %s", todo.UID)
-	}
-	if todo.Summary != "Comprehensive Todo Task" {
-		t.Errorf("Summary: expected 'Comprehensive Todo Task', got %s", todo.Summary)
-	}
-	if todo.Description != "This is a detailed todo description" {
-		t.Errorf("Description: expected 'This is a detailed todo description', got %s", todo.Description)
-	}
-	if todo.Status != "COMPLETED" {
-		t.Errorf("Status: expected 'COMPLETED', got %s", todo.Status)
-	}
-	if todo.Class != "CONFIDENTIAL" {
-		t.Errorf("Class: expected 'CONFIDENTIAL', got %s", todo.Class)
-	}
-	if todo.URL != "https://example.com/todo/123" {
-		t.Errorf("URL: expected 'https://example.com/todo/123', got %s", todo.URL)
-	}
+	verifyTodoStringProperties(t, &todo)
+	verifyTodoIntegerProperties(t, &todo)
+	verifyTodoTimeProperties(t, &todo)
 
-	// Test integer properties
-	if todo.PercentComplete != 100 {
-		t.Errorf("PercentComplete: expected 100, got %d", todo.PercentComplete)
-	}
-	if todo.Priority != 1 {
-		t.Errorf("Priority: expected 1, got %d", todo.Priority)
-	}
-	if todo.Sequence != 3 {
-		t.Errorf("Sequence: expected 3, got %d", todo.Sequence)
-	}
-
-	// Test time properties
-	expectedDTStamp, _ := time.Parse("20060102T150405Z", "20240101T120000Z")
-	if todo.DTStamp == nil || !todo.DTStamp.Equal(expectedDTStamp) {
-		t.Errorf("DTStamp: expected %v, got %v", expectedDTStamp, todo.DTStamp)
-	}
-
-	expectedDTStart, _ := time.Parse("20060102T150405Z", "20240115T090000Z")
-	if todo.DTStart == nil || !todo.DTStart.Equal(expectedDTStart) {
-		t.Errorf("DTStart: expected %v, got %v", expectedDTStart, todo.DTStart)
-	}
-
-	expectedDue, _ := time.Parse("20060102T150405Z", "20240120T170000Z")
-	if todo.Due == nil || !todo.Due.Equal(expectedDue) {
-		t.Errorf("Due: expected %v, got %v", expectedDue, todo.Due)
-	}
-
-	expectedCompleted, _ := time.Parse("20060102T150405Z", "20240118T160000Z")
-	if todo.Completed == nil || !todo.Completed.Equal(expectedCompleted) {
-		t.Errorf("Completed: expected %v, got %v", expectedCompleted, todo.Completed)
-	}
-
-	expectedCreated, _ := time.Parse("20060102T150405Z", "20240101T080000Z")
-	if todo.Created == nil || !todo.Created.Equal(expectedCreated) {
-		t.Errorf("Created: expected %v, got %v", expectedCreated, todo.Created)
-	}
-
-	expectedLastModified, _ := time.Parse("20060102T150405Z", "20240118T160000Z")
-	if todo.LastModified == nil || !todo.LastModified.Equal(expectedLastModified) {
-		t.Errorf("LastModified: expected %v, got %v", expectedLastModified, todo.LastModified)
-	}
-
-	// Test categories
 	expectedCategories := []string{"Work", "Project", "High-Priority"}
 	if !reflect.DeepEqual(todo.Categories, expectedCategories) {
 		t.Errorf("Categories: expected %v, got %v", expectedCategories, todo.Categories)
 	}
 
-	// Test custom properties
-	if todo.CustomProperties["X-CUSTOM-TODO"] != "custom-todo-value" {
-		t.Errorf("Custom property X-CUSTOM-TODO: expected 'custom-todo-value', got %s",
-			todo.CustomProperties["X-CUSTOM-TODO"])
+	expectedCustomProps := map[string]string{
+		"X-CUSTOM-TODO":  "custom-todo-value",
+		"X-ANOTHER-PROP": "another-value",
 	}
-	if todo.CustomProperties["X-ANOTHER-PROP"] != "another-value" {
-		t.Errorf("Custom property X-ANOTHER-PROP: expected 'another-value', got %s",
-			todo.CustomProperties["X-ANOTHER-PROP"])
+
+	for key, expected := range expectedCustomProps {
+		if actual := todo.CustomProperties[key]; actual != expected {
+			t.Errorf("Custom property %s: expected '%s', got '%s'", key, expected, actual)
+		}
 	}
 }
 

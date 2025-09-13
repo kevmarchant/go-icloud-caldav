@@ -226,13 +226,13 @@ func TestCheckPermission(t *testing.T) {
 		t.Error("expected write permission to be true")
 	}
 
-	// Test delete permission (should be false)
+	// Test delete permission (should be false since unbind is not granted)
 	hasDelete, err := client.CheckPermission(context.Background(), "/testuser/calendars/home/", "unbind")
 	if err != nil {
 		t.Fatalf("CheckPermission failed: %v", err)
 	}
 	if hasDelete {
-		t.Error("expected delete permission to be false")
+		t.Errorf("expected delete permission to be false, got %v", hasDelete)
 	}
 }
 

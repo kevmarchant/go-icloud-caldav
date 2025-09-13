@@ -135,39 +135,45 @@ func (e *CalDAVError) IsClientError() bool {
 	return e.StatusCode >= 400 && e.StatusCode < 500
 }
 
+var statusCodeToErrorType = map[int]ErrorType{
+	http.StatusUnauthorized:       ErrorTypeAuthentication,
+	http.StatusForbidden:          ErrorTypePermission,
+	http.StatusNotFound:           ErrorTypeNotFound,
+	http.StatusPreconditionFailed: ErrorTypePrecondition,
+	http.StatusTooManyRequests:    ErrorTypeRateLimit,
+	http.StatusRequestTimeout:     ErrorTypeTimeout,
+	http.StatusBadGateway:         ErrorTypeServerError,
+	http.StatusGatewayTimeout:     ErrorTypeTimeout,
+	http.StatusConflict:           ErrorTypeConflict,
+	418:                           ErrorTypeUnknown, // I'm a teapot
+}
+
 func newCalDAVError(op string, statusCode int, message string) *CalDAVError {
-	var errorType ErrorType
-	switch statusCode {
-	case http.StatusUnauthorized:
-		errorType = ErrorTypeAuthentication
-	case http.StatusForbidden:
-		errorType = ErrorTypePermission
-	case http.StatusNotFound:
-		errorType = ErrorTypeNotFound
-	case http.StatusPreconditionFailed:
-		errorType = ErrorTypePrecondition
-	case http.StatusTooManyRequests:
-		errorType = ErrorTypeRateLimit
-	case http.StatusRequestTimeout:
-		errorType = ErrorTypeTimeout
-	case http.StatusBadGateway:
-		errorType = ErrorTypeServerError
-	case http.StatusGatewayTimeout:
-		errorType = ErrorTypeTimeout
-	case http.StatusConflict:
-		errorType = ErrorTypeConflict
-	case 418: // I'm a teapot
-		errorType = ErrorTypeUnknown
-	default:
-		if statusCode >= 500 {
-			errorType = ErrorTypeServerError
-		} else if statusCode >= 400 {
-			errorType = ErrorTypeInvalidRequest
-		} else {
-			errorType = ErrorTypeUnknown
-		}
+	errorType := getErrorTypeFromStatus(statusCode)
+	normalizedMessage := normalizeErrorMessage(message, statusCode)
+
+	return &CalDAVError{
+		Op:         op,
+		Type:       errorType,
+		StatusCode: statusCode,
+		Message:    normalizedMessage,
+	}
+}
+
+func getErrorTypeFromStatus(statusCode int) ErrorType {
+	if errType, ok := statusCodeToErrorType[statusCode]; ok {
+		return errType
 	}
 
+	if statusCode >= 500 {
+		return ErrorTypeServerError
+	} else if statusCode >= 400 {
+		return ErrorTypeInvalidRequest
+	}
+	return ErrorTypeUnknown
+}
+
+func normalizeErrorMessage(message string, statusCode int) string {
 	// Normalize message to lowercase for consistency
 	normalizedMessage := strings.ToLower(message)
 	if statusCode == 418 && !strings.Contains(normalizedMessage, "status") {
@@ -180,12 +186,7 @@ func newCalDAVError(op string, statusCode int, message string) *CalDAVError {
 		normalizedMessage = normalizedMessage[:maxMessageLength] + "..."
 	}
 
-	return &CalDAVError{
-		Op:         op,
-		Type:       errorType,
-		StatusCode: statusCode,
-		Message:    normalizedMessage,
-	}
+	return normalizedMessage
 }
 
 func newTypedError(op string, errorType ErrorType, message string, err error) *CalDAVError {
@@ -233,43 +234,35 @@ func wrapErrorWithType(op string, errorType ErrorType, err error) *CalDAVError {
 	}
 }
 
+var errorTypeMap = []struct {
+	err     error
+	errType ErrorType
+}{
+	{ErrAuthentication, ErrorTypeAuthentication},
+	{ErrNotFound, ErrorTypeNotFound},
+	{ErrPreconditionFailed, ErrorTypePrecondition},
+	{ErrInvalidResponse, ErrorTypeInvalidResponse},
+	{ErrTimeout, ErrorTypeTimeout},
+	{ErrCanceled, ErrorTypeCanceled},
+	{ErrInvalidXML, ErrorTypeInvalidXML},
+	{ErrNoCalendars, ErrorTypeNoCalendars},
+	{ErrInvalidTimeRange, ErrorTypeInvalidTimeRange},
+	{ErrNetwork, ErrorTypeNetwork},
+	{ErrRateLimit, ErrorTypeRateLimit},
+	{ErrServerError, ErrorTypeServerError},
+	{ErrInvalidRequest, ErrorTypeInvalidRequest},
+	{ErrPermission, ErrorTypePermission},
+	{ErrConflict, ErrorTypeConflict},
+	{ErrValidation, ErrorTypeValidation},
+}
+
 func inferErrorType(err error) ErrorType {
-	switch {
-	case errors.Is(err, ErrAuthentication):
-		return ErrorTypeAuthentication
-	case errors.Is(err, ErrNotFound):
-		return ErrorTypeNotFound
-	case errors.Is(err, ErrPreconditionFailed):
-		return ErrorTypePrecondition
-	case errors.Is(err, ErrInvalidResponse):
-		return ErrorTypeInvalidResponse
-	case errors.Is(err, ErrTimeout):
-		return ErrorTypeTimeout
-	case errors.Is(err, ErrCanceled):
-		return ErrorTypeCanceled
-	case errors.Is(err, ErrInvalidXML):
-		return ErrorTypeInvalidXML
-	case errors.Is(err, ErrNoCalendars):
-		return ErrorTypeNoCalendars
-	case errors.Is(err, ErrInvalidTimeRange):
-		return ErrorTypeInvalidTimeRange
-	case errors.Is(err, ErrNetwork):
-		return ErrorTypeNetwork
-	case errors.Is(err, ErrRateLimit):
-		return ErrorTypeRateLimit
-	case errors.Is(err, ErrServerError):
-		return ErrorTypeServerError
-	case errors.Is(err, ErrInvalidRequest):
-		return ErrorTypeInvalidRequest
-	case errors.Is(err, ErrPermission):
-		return ErrorTypePermission
-	case errors.Is(err, ErrConflict):
-		return ErrorTypeConflict
-	case errors.Is(err, ErrValidation):
-		return ErrorTypeValidation
-	default:
-		return ErrorTypeUnknown
+	for _, mapping := range errorTypeMap {
+		if errors.Is(err, mapping.err) {
+			return mapping.errType
+		}
 	}
+	return ErrorTypeUnknown
 }
 
 type MultiStatusError struct {

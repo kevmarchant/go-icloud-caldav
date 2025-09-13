@@ -159,24 +159,7 @@ func parseDateTime(dateStr string) (time.Time, error) {
 	return ParseCalDAVTime(dateStr)
 }
 
-func convertPropData(xmlProp xmlPropData) PropstatProp {
-	prop := PropstatProp{
-		DisplayName:          xmlProp.DisplayName,
-		CalendarDescription:  xmlProp.CalendarDescription,
-		CalendarColor:        xmlProp.CalendarColor,
-		CTag:                 xmlProp.GetCTag,
-		ETag:                 xmlProp.GetETag,
-		CalendarData:         xmlProp.CalendarData,
-		CurrentUserPrincipal: xmlProp.CurrentUserPrincipal.Href,
-		CalendarHomeSet:      xmlProp.CalendarHomeSet.Href,
-		Owner:                xmlProp.Owner.Href,
-		CalendarTimeZone:     xmlProp.CalendarTimeZone,
-		MinDateTime:          xmlProp.MinDateTime,
-		MaxDateTime:          xmlProp.MaxDateTime,
-		Source:               xmlProp.Source.Href,
-	}
-
-	// Parse numeric fields
+func parseNumericFields(xmlProp xmlPropData, prop *PropstatProp) {
 	if xmlProp.MaxResourceSize != "" {
 		if size, err := strconv.ParseInt(xmlProp.MaxResourceSize, 10, 64); err == nil {
 			prop.MaxResourceSize = size
@@ -202,95 +185,121 @@ func convertPropData(xmlProp xmlPropData) PropstatProp {
 			prop.QuotaAvailableBytes = quota
 		}
 	}
-
-	// Parse resource types
-	if xmlProp.ResourceType.Collection != nil {
-		prop.ResourceType = append(prop.ResourceType, "collection")
-	}
-	if xmlProp.ResourceType.Calendar != nil {
-		prop.ResourceType = append(prop.ResourceType, "calendar")
-	}
-	if xmlProp.ResourceType.Principal != nil {
-		prop.ResourceType = append(prop.ResourceType, "principal")
-	}
-
-	// Parse supported components
-	for _, comp := range xmlProp.SupportedCalendarComponentSet.Comps {
-		prop.SupportedCalendarComponentSet = append(prop.SupportedCalendarComponentSet, comp.Name)
-	}
-
-	// Parse current user privilege set
-	for _, priv := range xmlProp.CurrentUserPrivilegeSet.Privileges {
-		if priv.Read != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read")
-		}
-		if priv.Write != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write")
-		}
-		if priv.WriteProperties != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-properties")
-		}
-		if priv.WriteContent != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-content")
-		}
-		if priv.ReadCurrentUserPrivilegeSet != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-current-user-privilege-set")
-		}
-		if priv.ReadACL != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-acl")
-		}
-		if priv.WriteACL != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "write-acl")
-		}
-		if priv.All != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "all")
-		}
-		if priv.CalendarAccess != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "calendar-access")
-		}
-		if priv.ReadFreeBusy != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "read-free-busy")
-		}
-		if priv.ScheduleInbox != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-inbox")
-		}
-		if priv.ScheduleOutbox != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-outbox")
-		}
-		if priv.ScheduleSend != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-send")
-		}
-		if priv.ScheduleDeliver != nil {
-			prop.CurrentUserPrivilegeSet = append(prop.CurrentUserPrivilegeSet, "schedule-deliver")
-		}
-	}
-
-	// Parse supported reports
-	for _, report := range xmlProp.SupportedReportSet.SupportedReports {
-		if report.Report.CalendarMultiget != nil {
-			prop.SupportedReports = append(prop.SupportedReports, "calendar-multiget")
-		}
-		if report.Report.CalendarQuery != nil {
-			prop.SupportedReports = append(prop.SupportedReports, "calendar-query")
-		}
-		if report.Report.FreeBusyQuery != nil {
-			prop.SupportedReports = append(prop.SupportedReports, "free-busy-query")
-		}
-		if report.Report.SyncCollection != nil {
-			prop.SupportedReports = append(prop.SupportedReports, "sync-collection")
-		}
-	}
-
-	// Parse attachment-related properties
-	prop.ContentType = xmlProp.GetContentType
-	prop.CreationDate = xmlProp.CreationDate
-	prop.LastModified = xmlProp.GetLastModified
-
 	if xmlProp.GetContentLength != "" {
 		if length, err := strconv.ParseInt(xmlProp.GetContentLength, 10, 64); err == nil {
 			prop.ContentLength = length
 		}
 	}
+}
+
+func parseResourceTypes(xmlProp xmlPropData) []string {
+	var resourceTypes []string
+	if xmlProp.ResourceType.Collection != nil {
+		resourceTypes = append(resourceTypes, "collection")
+	}
+	if xmlProp.ResourceType.Calendar != nil {
+		resourceTypes = append(resourceTypes, "calendar")
+	}
+	if xmlProp.ResourceType.Principal != nil {
+		resourceTypes = append(resourceTypes, "principal")
+	}
+	return resourceTypes
+}
+
+func parseSupportedComponents(xmlProp xmlPropData) []string {
+	var components []string
+	for _, comp := range xmlProp.SupportedCalendarComponentSet.Comps {
+		components = append(components, comp.Name)
+	}
+	return components
+}
+
+func parsePrivilegeSet(xmlProp xmlPropData) []string {
+	var privileges []string
+	for _, priv := range xmlProp.CurrentUserPrivilegeSet.Privileges {
+		privileges = append(privileges, extractPrivilegeNames(priv)...)
+	}
+	return privileges
+}
+
+func extractPrivilegeNames(priv xmlPrivilege) []string {
+	var names []string
+
+	type privilegeCheck struct {
+		field *struct{}
+		name  string
+	}
+
+	checks := []privilegeCheck{
+		{priv.Read, "read"},
+		{priv.Write, "write"},
+		{priv.WriteProperties, "write-properties"},
+		{priv.WriteContent, "write-content"},
+		{priv.ReadCurrentUserPrivilegeSet, "read-current-user-privilege-set"},
+		{priv.ReadACL, "read-acl"},
+		{priv.WriteACL, "write-acl"},
+		{priv.All, "all"},
+		{priv.CalendarAccess, "calendar-access"},
+		{priv.ReadFreeBusy, "read-free-busy"},
+		{priv.ScheduleInbox, "schedule-inbox"},
+		{priv.ScheduleOutbox, "schedule-outbox"},
+		{priv.ScheduleSend, "schedule-send"},
+		{priv.ScheduleDeliver, "schedule-deliver"},
+	}
+
+	for _, check := range checks {
+		if check.field != nil {
+			names = append(names, check.name)
+		}
+	}
+
+	return names
+}
+
+func parseSupportedReports(xmlProp xmlPropData) []string {
+	var reports []string
+	for _, report := range xmlProp.SupportedReportSet.SupportedReports {
+		if report.Report.CalendarMultiget != nil {
+			reports = append(reports, "calendar-multiget")
+		}
+		if report.Report.CalendarQuery != nil {
+			reports = append(reports, "calendar-query")
+		}
+		if report.Report.FreeBusyQuery != nil {
+			reports = append(reports, "free-busy-query")
+		}
+		if report.Report.SyncCollection != nil {
+			reports = append(reports, "sync-collection")
+		}
+	}
+	return reports
+}
+
+func convertPropData(xmlProp xmlPropData) PropstatProp {
+	prop := PropstatProp{
+		DisplayName:          xmlProp.DisplayName,
+		CalendarDescription:  xmlProp.CalendarDescription,
+		CalendarColor:        xmlProp.CalendarColor,
+		CTag:                 xmlProp.GetCTag,
+		ETag:                 xmlProp.GetETag,
+		CalendarData:         xmlProp.CalendarData,
+		CurrentUserPrincipal: xmlProp.CurrentUserPrincipal.Href,
+		CalendarHomeSet:      xmlProp.CalendarHomeSet.Href,
+		Owner:                xmlProp.Owner.Href,
+		CalendarTimeZone:     xmlProp.CalendarTimeZone,
+		MinDateTime:          xmlProp.MinDateTime,
+		MaxDateTime:          xmlProp.MaxDateTime,
+		Source:               xmlProp.Source.Href,
+		ContentType:          xmlProp.GetContentType,
+		CreationDate:         xmlProp.CreationDate,
+		LastModified:         xmlProp.GetLastModified,
+	}
+
+	parseNumericFields(xmlProp, &prop)
+	prop.ResourceType = parseResourceTypes(xmlProp)
+	prop.SupportedCalendarComponentSet = parseSupportedComponents(xmlProp)
+	prop.CurrentUserPrivilegeSet = parsePrivilegeSet(xmlProp)
+	prop.SupportedReports = parseSupportedReports(xmlProp)
 
 	return prop
 }
@@ -403,42 +412,61 @@ func parseCalendarData(obj *CalendarObject, data string) {
 	lines := strings.Split(data, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		parseCalendarLine(obj, line)
+	}
+}
 
-		if strings.HasPrefix(line, "UID:") {
-			obj.UID = strings.TrimPrefix(line, "UID:")
-		} else if strings.HasPrefix(line, "SUMMARY:") {
-			obj.Summary = strings.TrimPrefix(line, "SUMMARY:")
-		} else if strings.HasPrefix(line, "DESCRIPTION:") {
-			obj.Description = strings.TrimPrefix(line, "DESCRIPTION:")
-		} else if strings.HasPrefix(line, "LOCATION:") {
-			obj.Location = strings.TrimPrefix(line, "LOCATION:")
-		} else if strings.HasPrefix(line, "STATUS:") {
-			obj.Status = strings.TrimPrefix(line, "STATUS:")
-		} else if strings.HasPrefix(line, "ORGANIZER:") {
-			obj.Organizer = strings.TrimPrefix(line, "ORGANIZER:")
-		} else if strings.HasPrefix(line, "DTSTART:") || strings.HasPrefix(line, "DTSTART;") {
-			if t := parseICalTime(line); t != nil {
-				obj.StartTime = t
-			}
-		} else if strings.HasPrefix(line, "DTEND:") || strings.HasPrefix(line, "DTEND;") {
-			if t := parseICalTime(line); t != nil {
-				obj.EndTime = t
-			}
-		} else if strings.HasPrefix(line, "CREATED:") {
-			if t := parseICalTime(line); t != nil {
-				obj.Created = t
-			}
-		} else if strings.HasPrefix(line, "LAST-MODIFIED:") {
-			if t := parseICalTime(line); t != nil {
-				obj.LastModified = t
-			}
-		} else if after, ok := strings.CutPrefix(line, "ATTENDEE:"); ok {
-			attendee := after
-			if after, ok := strings.CutPrefix(attendee, "mailto:"); ok {
-				attendee = after
-			}
-			obj.Attendees = append(obj.Attendees, attendee)
+func parseCalendarLine(obj *CalendarObject, line string) {
+	simpleFields := map[string]*string{
+		"UID:":         &obj.UID,
+		"SUMMARY:":     &obj.Summary,
+		"DESCRIPTION:": &obj.Description,
+		"LOCATION:":    &obj.Location,
+		"STATUS:":      &obj.Status,
+		"ORGANIZER:":   &obj.Organizer,
+	}
+
+	for prefix, field := range simpleFields {
+		if strings.HasPrefix(line, prefix) {
+			*field = strings.TrimPrefix(line, prefix)
+			return
 		}
+	}
+
+	parseCalendarTimeFields(obj, line)
+	parseCalendarAttendee(obj, line)
+}
+
+func parseCalendarTimeFields(obj *CalendarObject, line string) {
+	timeFields := []struct {
+		prefixes []string
+		field    **time.Time
+	}{
+		{[]string{"DTSTART:", "DTSTART;"}, &obj.StartTime},
+		{[]string{"DTEND:", "DTEND;"}, &obj.EndTime},
+		{[]string{"CREATED:"}, &obj.Created},
+		{[]string{"LAST-MODIFIED:"}, &obj.LastModified},
+	}
+
+	for _, tf := range timeFields {
+		for _, prefix := range tf.prefixes {
+			if strings.HasPrefix(line, prefix) {
+				if t := parseICalTime(line); t != nil {
+					*tf.field = t
+				}
+				return
+			}
+		}
+	}
+}
+
+func parseCalendarAttendee(obj *CalendarObject, line string) {
+	if after, ok := strings.CutPrefix(line, "ATTENDEE:"); ok {
+		attendee := after
+		if after, ok := strings.CutPrefix(attendee, "mailto:"); ok {
+			attendee = after
+		}
+		obj.Attendees = append(obj.Attendees, attendee)
 	}
 }
 

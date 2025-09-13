@@ -174,56 +174,30 @@ func (rt *roundTripperWithRetry) RoundTrip(req *http.Request) (*http.Response, e
 
 	for attempt := 0; attempt <= rt.config.MaxRetries; attempt++ {
 		if attempt > 0 {
-			interval := calculateBackoff(attempt, rt.config)
-			rt.logger.Debug("Retrying request after %v (attempt %d/%d)", interval, attempt, rt.config.MaxRetries)
-			if rt.metrics != nil {
-				rt.metrics.RetriedRequests++
-			}
-
-			timer := time.NewTimer(interval)
-			select {
-			case <-timer.C:
-			case <-req.Context().Done():
-				timer.Stop()
-				return nil, req.Context().Err()
+			if err := rt.waitForRetry(req, attempt); err != nil {
+				return nil, err
 			}
 		}
 
-		clonedReq := req.Clone(req.Context())
-		if req.Body != nil && req.GetBody != nil {
-			body, err := req.GetBody()
-			if err != nil {
-				return nil, wrapErrorWithType("failed to get request body for retry", ErrorTypeClient, err)
-			}
-			clonedReq.Body = body
+		clonedReq, err := rt.prepareRequest(req)
+		if err != nil {
+			return nil, err
 		}
 
 		resp, lastErr = rt.transport.RoundTrip(clonedReq)
 
-		if lastErr == nil && resp != nil {
-			if !retryableStatusCode(resp.StatusCode, rt.config) {
-				if attempt > 0 && rt.metrics != nil {
-					rt.metrics.SuccessfulRetries++
-				}
-				return resp, nil
-			}
+		if result, shouldContinue := rt.handleResponse(resp, lastErr, attempt); !shouldContinue {
+			return result.resp, result.err
+		}
 
-			rt.logger.Warn("Received retryable status code: %d", resp.StatusCode)
-			if resp.Body != nil {
-				_ = resp.Body.Close()
-			}
+		// Update lastErr if handleResponse modified it
+		if resp != nil && lastErr == nil {
 			lastErr = newTypedErrorWithContext("retry", ErrorTypeServer, "retryable status code", nil, map[string]interface{}{"status": resp.StatusCode})
-		} else if lastErr != nil && !retryableError(lastErr) {
-			rt.logger.Debug("Non-retryable error: %v", lastErr)
-			return nil, lastErr
 		}
 	}
 
-	if rt.metrics != nil && rt.config.MaxRetries > 0 {
-		rt.metrics.FailedConnections++
-	}
+	rt.recordFailure()
 
-	// If we have a response (even with retryable status), return it after exhausting retries
 	if resp != nil {
 		return resp, nil
 	}
@@ -234,6 +208,68 @@ func (rt *roundTripperWithRetry) RoundTrip(req *http.Request) (*http.Response, e
 	}
 
 	return nil, newTypedError("retry", ErrorTypeNetwork, "request failed without error", nil)
+}
+
+type retryResult struct {
+	resp *http.Response
+	err  error
+}
+
+func (rt *roundTripperWithRetry) waitForRetry(req *http.Request, attempt int) error {
+	interval := calculateBackoff(attempt, rt.config)
+	rt.logger.Debug("Retrying request after %v (attempt %d/%d)", interval, attempt, rt.config.MaxRetries)
+	if rt.metrics != nil {
+		rt.metrics.RetriedRequests++
+	}
+
+	timer := time.NewTimer(interval)
+	select {
+	case <-timer.C:
+		return nil
+	case <-req.Context().Done():
+		timer.Stop()
+		return req.Context().Err()
+	}
+}
+
+func (rt *roundTripperWithRetry) prepareRequest(req *http.Request) (*http.Request, error) {
+	clonedReq := req.Clone(req.Context())
+	if req.Body != nil && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, wrapErrorWithType("failed to get request body for retry", ErrorTypeClient, err)
+		}
+		clonedReq.Body = body
+	}
+	return clonedReq, nil
+}
+
+func (rt *roundTripperWithRetry) handleResponse(resp *http.Response, err error, attempt int) (retryResult, bool) {
+	if err == nil && resp != nil {
+		if !retryableStatusCode(resp.StatusCode, rt.config) {
+			if attempt > 0 && rt.metrics != nil {
+				rt.metrics.SuccessfulRetries++
+			}
+			return retryResult{resp: resp, err: nil}, false
+		}
+
+		rt.logger.Warn("Received retryable status code: %d", resp.StatusCode)
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		// Don't assign to err here - it's handled in the main RoundTrip function
+	} else if err != nil && !retryableError(err) {
+		rt.logger.Debug("Non-retryable error: %v", err)
+		return retryResult{resp: nil, err: err}, false
+	}
+
+	return retryResult{}, true
+}
+
+func (rt *roundTripperWithRetry) recordFailure() {
+	if rt.metrics != nil && rt.config.MaxRetries > 0 {
+		rt.metrics.FailedConnections++
+	}
 }
 
 // instrumentedTransport wraps a transport to collect metrics.

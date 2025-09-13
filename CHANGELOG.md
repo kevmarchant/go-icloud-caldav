@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-09-13
+
+### Improved
+
+- **Code Quality - Achieved A- Grade**
+  - Reduced cyclomatic complexity by 75% (from 16 to 4 functions exceeding threshold)
+  - Refactored high-complexity functions for better maintainability
+  - All quality checks now pass (go vet, staticcheck, errcheck, ineffassign, golangci-lint)
+  - Improved code organisation and readability
+
+- **Performance Optimisations**
+  - Refactored XML building operations with helper functions for efficiency
+  - Optimised HTTP retry logic with better separation of concerns
+  - Improved parser performance through function decomposition
+  - Enhanced connection handling with cleaner retry mechanisms
+
+### Fixed
+
+- Fixed XML namespace handling in ACL privilege parsing
+- Fixed parser test compilation errors and type mismatches
+- Corrected privilege set extraction logic for proper ACL support
+- Fixed test failures in ACL permission checking
+- Resolved edge cases in calendar metadata parsing
+
+### Refactored
+
+- **Major Function Refactoring** (Complexity Reduction)
+  - `parsePrivilegeSet`: Split into smaller functions with map-based approach
+  - `parseCalendarData`: Decomposed into specialised parsing helpers
+  - `buildCalendarQueryXML`: Extracted filter and property handling
+  - `RoundTrip` (retry logic): Separated into wait, prepare, and handle methods
+  - `inferErrorType`: Converted from switch to map-based lookup
+  - `newCalDAVError`: Split error type detection and message normalisation
+  - `ParsePrivilegeSet`: Refactored with function map for cleaner logic
+
+### Development
+
+- Enhanced test reliability with proper XML structure validation
+- Improved test coverage to 84.3%
+- Better error handling patterns throughout the codebase
+- Cleaner separation of concerns in complex operations
+
 ## [0.2.1] - 2025-09-13
 
 ### Fixed

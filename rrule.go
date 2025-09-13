@@ -26,6 +26,55 @@ type RRule struct {
 }
 
 // ParseRRule parses an RRULE string into a structured RRule
+func parseRRuleField(rule *RRule, key, value string) {
+	stringFields := map[string]*string{
+		"FREQ": &rule.Freq,
+		"WKST": &rule.WeekStart,
+	}
+
+	if strPtr, ok := stringFields[key]; ok {
+		*strPtr = value
+		return
+	}
+
+	intFields := map[string]*int{
+		"INTERVAL": &rule.Interval,
+		"COUNT":    &rule.Count,
+	}
+
+	if intPtr, ok := intFields[key]; ok {
+		if i, err := strconv.Atoi(value); err == nil {
+			*intPtr = i
+		}
+		return
+	}
+
+	intListFields := map[string]*[]int{
+		"BYMONTH":    &rule.ByMonth,
+		"BYMONTHDAY": &rule.ByMonthDay,
+		"BYSETPOS":   &rule.BySetPos,
+		"BYWEEKNO":   &rule.ByWeekNo,
+		"BYYEARDAY":  &rule.ByYearDay,
+		"BYHOUR":     &rule.ByHour,
+		"BYMINUTE":   &rule.ByMinute,
+		"BYSECOND":   &rule.BySecond,
+	}
+
+	if intListPtr, ok := intListFields[key]; ok {
+		*intListPtr = parseIntList(value)
+		return
+	}
+
+	switch key {
+	case "UNTIL":
+		if t, err := parseRRuleTime(value); err == nil {
+			rule.Until = &t
+		}
+	case "BYDAY":
+		rule.ByDay = strings.Split(value, ",")
+	}
+}
+
 func ParseRRule(rruleStr string) (*RRule, error) {
 	if rruleStr == "" {
 		return nil, nil
@@ -44,46 +93,190 @@ func ParseRRule(rruleStr string) (*RRule, error) {
 
 		key := strings.ToUpper(kv[0])
 		value := kv[1]
-
-		switch key {
-		case "FREQ":
-			rule.Freq = value
-		case "INTERVAL":
-			if i, err := strconv.Atoi(value); err == nil {
-				rule.Interval = i
-			}
-		case "COUNT":
-			if c, err := strconv.Atoi(value); err == nil {
-				rule.Count = c
-			}
-		case "UNTIL":
-			if t, err := parseRRuleTime(value); err == nil {
-				rule.Until = &t
-			}
-		case "BYDAY":
-			rule.ByDay = strings.Split(value, ",")
-		case "BYMONTH":
-			rule.ByMonth = parseIntList(value)
-		case "BYMONTHDAY":
-			rule.ByMonthDay = parseIntList(value)
-		case "BYSETPOS":
-			rule.BySetPos = parseIntList(value)
-		case "BYWEEKNO":
-			rule.ByWeekNo = parseIntList(value)
-		case "BYYEARDAY":
-			rule.ByYearDay = parseIntList(value)
-		case "BYHOUR":
-			rule.ByHour = parseIntList(value)
-		case "BYMINUTE":
-			rule.ByMinute = parseIntList(value)
-		case "BYSECOND":
-			rule.BySecond = parseIntList(value)
-		case "WKST":
-			rule.WeekStart = value
-		}
+		parseRRuleField(rule, key, value)
 	}
 
 	return rule, nil
+}
+
+type expandEventState struct {
+	event         ParsedEvent
+	start, end    time.Time
+	duration      time.Duration
+	occurrences   []ParsedEvent
+	occurrenceMap map[string]bool
+	excludeMap    map[string]bool
+}
+
+func buildExclusionMap(event ParsedEvent, end time.Time) map[string]bool {
+	excludeMap := make(map[string]bool)
+	if event.ExceptionRule == "" || event.DTStart == nil {
+		return excludeMap
+	}
+
+	exRule, err := ParseRRule(event.ExceptionRule)
+	if err != nil || exRule == nil {
+		return excludeMap
+	}
+
+	current := *event.DTStart
+	maxIterations := 10000
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		if current.After(end.AddDate(1, 0, 0)) {
+			break
+		}
+		if exRule.Until != nil && current.After(*exRule.Until) {
+			break
+		}
+		excludeMap[current.Format("20060102T150405Z")] = true
+		current = nextOccurrence(current, exRule)
+	}
+
+	return excludeMap
+}
+
+func shouldIncludeMonthlyByDay(current time.Time, rule *RRule, isFirstOccurrence bool) bool {
+	if rule.Freq != "MONTHLY" || len(rule.ByDay) == 0 || !isFirstOccurrence {
+		return true
+	}
+
+	byDayParts := parseByDay(rule.ByDay)
+
+	if len(rule.BySetPos) > 0 {
+		return checkBySetPos(current, byDayParts, rule.BySetPos)
+	}
+
+	return checkRegularByDay(current, byDayParts)
+}
+
+func checkBySetPos(current time.Time, byDayParts []ByDayPart, bySetPos []int) bool {
+	var monthDates []time.Time
+	for _, part := range byDayParts {
+		weekday := weekdayToInt(part.Weekday)
+		if part.Position != 0 {
+			continue
+		}
+
+		for day := 1; day <= 31; day++ {
+			date := time.Date(current.Year(), current.Month(), day, current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location())
+			if date.Month() != current.Month() {
+				break
+			}
+			if date.Weekday() == weekday {
+				monthDates = append(monthDates, date)
+			}
+		}
+	}
+
+	if len(monthDates) == 0 {
+		return false
+	}
+
+	sortTimes(monthDates)
+	filteredDates := applyBySetPos(monthDates, bySetPos)
+	for _, date := range filteredDates {
+		if date.Day() == current.Day() {
+			return true
+		}
+	}
+	return false
+}
+
+func checkRegularByDay(current time.Time, byDayParts []ByDayPart) bool {
+	for _, part := range byDayParts {
+		if part.Position != 0 {
+			if date, ok := getNthWeekdayInMonth(current.Year(), current.Month(), weekdayToInt(part.Weekday), part.Position); ok {
+				if date.Day() == current.Day() {
+					return true
+				}
+			}
+		} else if current.Weekday() == weekdayToInt(part.Weekday) {
+			return true
+		}
+	}
+	return false
+}
+
+func addOccurrenceIfValid(state *expandEventState, expandedTime time.Time) {
+	key := expandedTime.Format("20060102T150405Z")
+	if state.occurrenceMap[key] || state.excludeMap[key] {
+		return
+	}
+
+	occurrence := state.event
+	occTime := expandedTime
+	occurrence.DTStart = &occTime
+
+	if state.event.DTEnd != nil {
+		endTime := expandedTime.Add(state.duration)
+		occurrence.DTEnd = &endTime
+	}
+
+	recID := expandedTime
+	occurrence.RecurrenceID = &recID
+
+	state.occurrences = append(state.occurrences, occurrence)
+	state.occurrenceMap[key] = true
+}
+
+func processRRuleOccurrences(state *expandEventState, rule *RRule) error {
+	if state.event.DTStart == nil {
+		return nil
+	}
+
+	current := *state.event.DTStart
+	instanceCount := 0
+	maxIterations := 10000
+	isFirstOccurrence := true
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		if current.After(state.end) || (rule.Until != nil && current.After(*rule.Until)) {
+			break
+		}
+		if rule.Count > 0 && instanceCount >= rule.Count {
+			break
+		}
+
+		shouldInclude := shouldIncludeMonthlyByDay(current, rule, isFirstOccurrence)
+
+		if shouldInclude && !current.Before(state.start) && !current.After(state.end) {
+			timesForDay := expandTimeGranularity(current, rule)
+
+			for _, expandedTime := range timesForDay {
+				if rule.Count > 0 && len(state.occurrences) >= rule.Count {
+					break
+				}
+				addOccurrenceIfValid(state, expandedTime)
+			}
+		}
+
+		instanceCount++
+		isFirstOccurrence = false
+		current = nextOccurrence(current, rule)
+
+		if rule.Count > 0 && len(state.occurrences) >= rule.Count {
+			break
+		}
+	}
+
+	return nil
+}
+
+func processRDateOccurrences(state *expandEventState) {
+	for _, rdate := range state.event.RecurrenceDates {
+		isExcluded := false
+		for _, exDate := range state.event.ExceptionDates {
+			if isSameDateTime(rdate, exDate) {
+				isExcluded = true
+				break
+			}
+		}
+
+		if !isExcluded && !rdate.Before(state.start) && !rdate.After(state.end) {
+			addOccurrenceIfValid(state, rdate)
+		}
+	}
 }
 
 // ExpandEvent generates individual event occurrences from a recurring event
@@ -92,207 +285,36 @@ func ExpandEvent(event ParsedEvent, start, end time.Time) ([]ParsedEvent, error)
 		return []ParsedEvent{event}, nil
 	}
 
-	occurrences := []ParsedEvent{}
-	occurrenceMap := make(map[string]bool)
-	excludeMap := make(map[string]bool)
-
 	var duration time.Duration
 	if event.DTEnd != nil && event.DTStart != nil {
 		duration = event.DTEnd.Sub(*event.DTStart)
 	}
 
-	// Build exclusion map from EXRULE if present
-	if event.ExceptionRule != "" {
-		exRule, err := ParseRRule(event.ExceptionRule)
-		if err == nil && exRule != nil && event.DTStart != nil {
-			current := *event.DTStart
-			maxIterations := 10000
-			iteration := 0
-
-			for iteration < maxIterations {
-				iteration++
-				if current.After(end.AddDate(1, 0, 0)) {
-					break
-				}
-				if exRule.Until != nil && current.After(*exRule.Until) {
-					break
-				}
-				excludeMap[current.Format("20060102T150405Z")] = true
-				current = nextOccurrence(current, exRule)
-			}
-		}
+	state := &expandEventState{
+		event:         event,
+		start:         start,
+		end:           end,
+		duration:      duration,
+		occurrences:   []ParsedEvent{},
+		occurrenceMap: make(map[string]bool),
+		excludeMap:    buildExclusionMap(event, end),
 	}
 
-	// Process RRULE occurrences
 	if event.RecurrenceRule != "" {
 		rule, err := ParseRRule(event.RecurrenceRule)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse RRULE: %w", err)
 		}
-
-		if rule != nil && event.DTStart != nil {
-			current := *event.DTStart
-			instanceCount := 0
-			maxIterations := 10000
-			iteration := 0
-			isFirstOccurrence := true
-
-			for iteration < maxIterations {
-				iteration++
-
-				if current.After(end) {
-					break
-				}
-
-				if rule.Until != nil && current.After(*rule.Until) {
-					break
-				}
-
-				if rule.Count > 0 && instanceCount >= rule.Count {
-					break
-				}
-
-				// For complex patterns, check if current matches the pattern
-				shouldInclude := true
-				if rule.Freq == "MONTHLY" && len(rule.ByDay) > 0 && isFirstOccurrence {
-					// Check if the start date actually matches the BYDAY pattern
-					shouldInclude = false
-					byDayParts := parseByDay(rule.ByDay)
-
-					// If we have BYSETPOS, we need to check differently
-					if len(rule.BySetPos) > 0 {
-						// Generate all matching dates in the current month
-						var monthDates []time.Time
-						for _, part := range byDayParts {
-							weekday := weekdayToInt(part.Weekday)
-							if part.Position == 0 {
-								// Every occurrence of this weekday in the month
-								for day := 1; day <= 31; day++ {
-									date := time.Date(current.Year(), current.Month(), day, current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location())
-									if date.Month() != current.Month() {
-										break
-									}
-									if date.Weekday() == weekday {
-										monthDates = append(monthDates, date)
-									}
-								}
-							}
-						}
-
-						// Apply BYSETPOS
-						if len(monthDates) > 0 {
-							sortTimes(monthDates)
-							filteredDates := applyBySetPos(monthDates, rule.BySetPos)
-							for _, date := range filteredDates {
-								if date.Day() == current.Day() {
-									shouldInclude = true
-									break
-								}
-							}
-						}
-					} else {
-						// Regular BYDAY check
-						for _, part := range byDayParts {
-							if part.Position != 0 {
-								// Check specific position
-								if date, ok := getNthWeekdayInMonth(current.Year(), current.Month(), weekdayToInt(part.Weekday), part.Position); ok {
-									if date.Day() == current.Day() {
-										shouldInclude = true
-										break
-									}
-								}
-							} else {
-								// Any occurrence of this weekday
-								if current.Weekday() == weekdayToInt(part.Weekday) {
-									shouldInclude = true
-									break
-								}
-							}
-						}
-					}
-				}
-
-				if shouldInclude && !current.Before(start) && !current.After(end) {
-					// Expand for time-level granularity if needed
-					timesForDay := expandTimeGranularity(current, rule)
-
-					for _, expandedTime := range timesForDay {
-						// Check if we've hit the COUNT limit
-						if rule.Count > 0 && len(occurrences) >= rule.Count {
-							break
-						}
-
-						key := expandedTime.Format("20060102T150405Z")
-						if !occurrenceMap[key] && !excludeMap[key] {
-							occurrence := event
-							occTime := expandedTime
-							occurrence.DTStart = &occTime
-
-							if event.DTEnd != nil {
-								endTime := expandedTime.Add(duration)
-								occurrence.DTEnd = &endTime
-							}
-
-							recID := expandedTime
-							occurrence.RecurrenceID = &recID
-
-							occurrences = append(occurrences, occurrence)
-							occurrenceMap[key] = true
-						}
-					}
-				}
-
-				instanceCount++
-				isFirstOccurrence = false
-				current = nextOccurrence(current, rule)
-
-				// Check if we've hit the COUNT limit with expansions
-				if rule.Count > 0 && len(occurrences) >= rule.Count {
-					break
-				}
+		if rule != nil {
+			if err := processRRuleOccurrences(state, rule); err != nil {
+				return nil, err
 			}
 		}
 	}
 
-	// Add RDATE occurrences
-	for _, rdate := range event.RecurrenceDates {
-		// Check if this date is in the exception dates (EXDATE)
-		isExcluded := false
-		for _, exDate := range event.ExceptionDates {
-			if isSameDateTime(rdate, exDate) {
-				isExcluded = true
-				break
-			}
-		}
+	processRDateOccurrences(state)
 
-		if !isExcluded && !rdate.Before(start) && !rdate.After(end) {
-			key := rdate.Format("20060102T150405Z")
-			if !occurrenceMap[key] {
-				occurrence := event
-				rdateCopy := rdate
-				occurrence.DTStart = &rdateCopy
-
-				if event.DTEnd != nil && event.DTStart != nil {
-					endTime := rdate.Add(duration)
-					occurrence.DTEnd = &endTime
-				}
-
-				occurrence.RecurrenceID = &rdateCopy
-
-				occurrences = append(occurrences, occurrence)
-				occurrenceMap[key] = true
-			}
-		}
-	}
-
-	// If no recurrence but we have the base event
-	if len(occurrences) == 0 && event.DTStart != nil {
-		if !event.DTStart.Before(start) && !event.DTStart.After(end) {
-			return []ParsedEvent{event}, nil
-		}
-	}
-
-	return occurrences, nil
+	return state.occurrences, nil
 }
 
 // nextOccurrence calculates the next occurrence based on the recurrence rule
@@ -578,128 +600,133 @@ func ExpandEventWithExceptions(event ParsedEvent, exceptions map[string]*ParsedE
 
 	occurrences := []ParsedEvent{}
 	occurrenceMap := make(map[string]bool)
+	duration := calculateEventDurationForExpansion(event)
 
-	var duration time.Duration
-	if event.DTEnd != nil && event.DTStart != nil {
-		duration = event.DTEnd.Sub(*event.DTStart)
-	}
-
-	// Process RRULE occurrences
 	if event.RecurrenceRule != "" {
-		rule, err := ParseRRule(event.RecurrenceRule)
+		rruleOccurrences, err := processRRuleForExpansion(event, exceptions, start, end, duration, occurrenceMap)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse RRULE: %w", err)
+			return nil, err
 		}
-
-		if rule != nil && event.DTStart != nil {
-			current := *event.DTStart
-			instanceCount := 0
-			maxIterations := 10000
-			iteration := 0
-
-			for iteration < maxIterations {
-				iteration++
-
-				if current.After(end) {
-					break
-				}
-
-				if rule.Until != nil && current.After(*rule.Until) {
-					break
-				}
-
-				if rule.Count > 0 && instanceCount >= rule.Count {
-					break
-				}
-
-				// Check if this date is in the exception dates (EXDATE)
-				isExcluded := false
-				for _, exDate := range event.ExceptionDates {
-					if isSameDateTime(current, exDate) {
-						isExcluded = true
-						break
-					}
-				}
-
-				if !isExcluded && !current.Before(start) && !current.After(end) {
-					recIDStr := current.Format("20060102T150405Z")
-					if !occurrenceMap[recIDStr] {
-						// Check if there's an exception/modification for this occurrence
-						if exception, exists := exceptions[recIDStr]; exists {
-							// Use the modified version
-							occurrences = append(occurrences, *exception)
-						} else {
-							// Create normal occurrence
-							occurrence := event
-							occTime := current
-							occurrence.DTStart = &occTime
-
-							if event.DTEnd != nil {
-								endTime := current.Add(duration)
-								occurrence.DTEnd = &endTime
-							}
-
-							recID := current
-							occurrence.RecurrenceID = &recID
-
-							occurrences = append(occurrences, occurrence)
-						}
-						occurrenceMap[recIDStr] = true
-					}
-				}
-
-				instanceCount++
-				current = nextOccurrence(current, rule)
-			}
-		}
+		occurrences = append(occurrences, rruleOccurrences...)
 	}
 
-	// Process RDATE occurrences
-	for _, rdate := range event.RecurrenceDates {
-		// Check if this date is in the exception dates (EXDATE)
-		isExcluded := false
-		for _, exDate := range event.ExceptionDates {
-			if isSameDateTime(rdate, exDate) {
-				isExcluded = true
-				break
-			}
-		}
+	rdateOccurrences := processRDateForExpansion(event, exceptions, start, end, duration, occurrenceMap)
+	occurrences = append(occurrences, rdateOccurrences...)
 
-		if !isExcluded && !rdate.Before(start) && !rdate.After(end) {
-			recIDStr := rdate.Format("20060102T150405Z")
-			if !occurrenceMap[recIDStr] {
-				// Check if there's an exception/modification for this occurrence
-				if exception, exists := exceptions[recIDStr]; exists {
-					// Use the modified version
-					occurrences = append(occurrences, *exception)
-				} else {
-					// Create occurrence from RDATE
-					occurrence := event
-					rdateCopy := rdate
-					occurrence.DTStart = &rdateCopy
-
-					if event.DTEnd != nil && event.DTStart != nil {
-						endTime := rdate.Add(duration)
-						occurrence.DTEnd = &endTime
-					}
-
-					occurrence.RecurrenceID = &rdateCopy
-
-					occurrences = append(occurrences, occurrence)
-				}
-				occurrenceMap[recIDStr] = true
-			}
-		}
-	}
-
-	// If no recurrence but we have the base event
 	if len(occurrences) == 0 && event.DTStart != nil {
-		if !event.DTStart.Before(start) && !event.DTStart.After(end) {
+		if isInDateRange(*event.DTStart, start, end) {
 			return []ParsedEvent{event}, nil
 		}
 	}
 
 	return occurrences, nil
+}
+
+func calculateEventDurationForExpansion(event ParsedEvent) time.Duration {
+	if event.DTEnd != nil && event.DTStart != nil {
+		return event.DTEnd.Sub(*event.DTStart)
+	}
+	return 0
+}
+
+func processRRuleForExpansion(event ParsedEvent, exceptions map[string]*ParsedEvent, start, end time.Time, duration time.Duration, occurrenceMap map[string]bool) ([]ParsedEvent, error) {
+	rule, err := ParseRRule(event.RecurrenceRule)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse RRULE: %w", err)
+	}
+
+	if rule == nil || event.DTStart == nil {
+		return nil, nil
+	}
+
+	occurrences := []ParsedEvent{}
+	current := *event.DTStart
+	instanceCount := 0
+	maxIterations := 10000
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		if shouldStopRRuleIteration(current, end, rule, instanceCount) {
+			break
+		}
+
+		if !isExcludedDate(current, event.ExceptionDates) && isInDateRange(current, start, end) {
+			if occ := createOccurrenceFromDate(event, current, duration, exceptions, occurrenceMap); occ != nil {
+				occurrences = append(occurrences, *occ)
+			}
+		}
+
+		instanceCount++
+		current = nextOccurrence(current, rule)
+	}
+
+	return occurrences, nil
+}
+
+func shouldStopRRuleIteration(current time.Time, end time.Time, rule *RRule, instanceCount int) bool {
+	if current.After(end) {
+		return true
+	}
+	if rule.Until != nil && current.After(*rule.Until) {
+		return true
+	}
+	if rule.Count > 0 && instanceCount >= rule.Count {
+		return true
+	}
+	return false
+}
+
+func processRDateForExpansion(event ParsedEvent, exceptions map[string]*ParsedEvent, start, end time.Time, duration time.Duration, occurrenceMap map[string]bool) []ParsedEvent {
+	occurrences := []ParsedEvent{}
+
+	for _, rdate := range event.RecurrenceDates {
+		if !isExcludedDate(rdate, event.ExceptionDates) && isInDateRange(rdate, start, end) {
+			if occ := createOccurrenceFromDate(event, rdate, duration, exceptions, occurrenceMap); occ != nil {
+				occurrences = append(occurrences, *occ)
+			}
+		}
+	}
+
+	return occurrences
+}
+
+func isExcludedDate(date time.Time, exceptionDates []time.Time) bool {
+	for _, exDate := range exceptionDates {
+		if isSameDateTime(date, exDate) {
+			return true
+		}
+	}
+	return false
+}
+
+func isInDateRange(date, start, end time.Time) bool {
+	return !date.Before(start) && !date.After(end)
+}
+
+func createOccurrenceFromDate(event ParsedEvent, occurrenceDate time.Time, duration time.Duration, exceptions map[string]*ParsedEvent, occurrenceMap map[string]bool) *ParsedEvent {
+	recIDStr := occurrenceDate.Format("20060102T150405Z")
+	if occurrenceMap[recIDStr] {
+		return nil
+	}
+
+	occurrenceMap[recIDStr] = true
+
+	if exception, exists := exceptions[recIDStr]; exists {
+		return exception
+	}
+
+	occurrence := event
+	occTime := occurrenceDate
+	occurrence.DTStart = &occTime
+
+	if event.DTEnd != nil {
+		endTime := occurrenceDate.Add(duration)
+		occurrence.DTEnd = &endTime
+	}
+
+	recID := occurrenceDate
+	occurrence.RecurrenceID = &recID
+
+	return &occurrence
 }
 
 // isSameDateTime checks if two times represent the same date/time

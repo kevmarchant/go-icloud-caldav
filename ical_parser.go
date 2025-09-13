@@ -197,51 +197,76 @@ func (p *icalParser) handleBegin(component string) {
 }
 
 func (p *icalParser) handleEnd(component string) {
-	switch component {
-	case "VEVENT":
+	handlers := map[string]func(){
+		"VEVENT":    p.handleEndEvent,
+		"VTODO":     p.handleEndTodo,
+		"VFREEBUSY": p.handleEndFreeBusy,
+		"VTIMEZONE": p.handleEndTimeZone,
+		"STANDARD":  p.handleEndStandard,
+		"DAYLIGHT":  p.handleEndDaylight,
+		"VALARM":    p.handleEndAlarm,
+	}
+
+	if handler, ok := handlers[component]; ok {
+		handler()
+	}
+}
+
+func (p *icalParser) handleEndEvent() {
+	if p.inEvent && p.currentEvent != nil {
+		p.result.Events = append(p.result.Events, *p.currentEvent)
+		p.currentEvent = nil
+		p.inEvent = false
+	}
+}
+
+func (p *icalParser) handleEndTodo() {
+	if p.inTodo && p.currentTodo != nil {
+		p.result.Todos = append(p.result.Todos, *p.currentTodo)
+		p.currentTodo = nil
+		p.inTodo = false
+	}
+}
+
+func (p *icalParser) handleEndFreeBusy() {
+	if p.inFreeBusy && p.currentFreeBusy != nil {
+		p.result.FreeBusy = append(p.result.FreeBusy, *p.currentFreeBusy)
+		p.currentFreeBusy = nil
+		p.inFreeBusy = false
+	}
+}
+
+func (p *icalParser) handleEndTimeZone() {
+	if p.inTimeZone && p.currentTimeZone != nil {
+		p.result.TimeZones = append(p.result.TimeZones, *p.currentTimeZone)
+		p.currentTimeZone = nil
+		p.inTimeZone = false
+	}
+}
+
+func (p *icalParser) handleEndStandard() {
+	if p.inTZStandard {
+		p.inTZStandard = false
+		p.currentTZComponent = nil
+	}
+}
+
+func (p *icalParser) handleEndDaylight() {
+	if p.inTZDaylight {
+		p.inTZDaylight = false
+		p.currentTZComponent = nil
+	}
+}
+
+func (p *icalParser) handleEndAlarm() {
+	if p.inAlarm && p.currentAlarm != nil {
 		if p.inEvent && p.currentEvent != nil {
-			p.result.Events = append(p.result.Events, *p.currentEvent)
-			p.currentEvent = nil
-			p.inEvent = false
+			p.currentEvent.Alarms = append(p.currentEvent.Alarms, *p.currentAlarm)
+		} else {
+			p.result.Alarms = append(p.result.Alarms, *p.currentAlarm)
 		}
-	case "VTODO":
-		if p.inTodo && p.currentTodo != nil {
-			p.result.Todos = append(p.result.Todos, *p.currentTodo)
-			p.currentTodo = nil
-			p.inTodo = false
-		}
-	case "VFREEBUSY":
-		if p.inFreeBusy && p.currentFreeBusy != nil {
-			p.result.FreeBusy = append(p.result.FreeBusy, *p.currentFreeBusy)
-			p.currentFreeBusy = nil
-			p.inFreeBusy = false
-		}
-	case "VTIMEZONE":
-		if p.inTimeZone && p.currentTimeZone != nil {
-			p.result.TimeZones = append(p.result.TimeZones, *p.currentTimeZone)
-			p.currentTimeZone = nil
-			p.inTimeZone = false
-		}
-	case "STANDARD":
-		if p.inTZStandard {
-			p.inTZStandard = false
-			p.currentTZComponent = nil
-		}
-	case "DAYLIGHT":
-		if p.inTZDaylight {
-			p.inTZDaylight = false
-			p.currentTZComponent = nil
-		}
-	case "VALARM":
-		if p.inAlarm && p.currentAlarm != nil {
-			if p.inEvent && p.currentEvent != nil {
-				p.currentEvent.Alarms = append(p.currentEvent.Alarms, *p.currentAlarm)
-			} else {
-				p.result.Alarms = append(p.result.Alarms, *p.currentAlarm)
-			}
-			p.currentAlarm = nil
-			p.inAlarm = false
-		}
+		p.currentAlarm = nil
+		p.inAlarm = false
 	}
 }
 
@@ -369,51 +394,50 @@ func (p *icalParser) appendEventDescription(value string) {
 }
 
 func (p *icalParser) handleTodoProperty(property, value string, params map[string]string) {
+	timeProperties := map[string]**time.Time{
+		"DTSTAMP":       &p.currentTodo.DTStamp,
+		"DTSTART":       &p.currentTodo.DTStart,
+		"DUE":           &p.currentTodo.Due,
+		"COMPLETED":     &p.currentTodo.Completed,
+		"CREATED":       &p.currentTodo.Created,
+		"LAST-MODIFIED": &p.currentTodo.LastModified,
+	}
+
+	if timePtr, ok := timeProperties[property]; ok {
+		if t := p.parseTime(value, params); t != nil {
+			*timePtr = t
+		}
+		return
+	}
+
+	stringProperties := map[string]*string{
+		"UID":         &p.currentTodo.UID,
+		"SUMMARY":     &p.currentTodo.Summary,
+		"DESCRIPTION": &p.currentTodo.Description,
+		"STATUS":      &p.currentTodo.Status,
+		"CLASS":       &p.currentTodo.Class,
+		"URL":         &p.currentTodo.URL,
+	}
+
+	if strPtr, ok := stringProperties[property]; ok {
+		*strPtr = value
+		return
+	}
+
+	intProperties := map[string]*int{
+		"PERCENT-COMPLETE": &p.currentTodo.PercentComplete,
+		"PRIORITY":         &p.currentTodo.Priority,
+		"SEQUENCE":         &p.currentTodo.Sequence,
+	}
+
+	if intPtr, ok := intProperties[property]; ok {
+		*intPtr = p.parseInt(value)
+		return
+	}
+
 	switch property {
-	case "UID":
-		p.currentTodo.UID = value
-	case "DTSTAMP":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.DTStamp = t
-		}
-	case "DTSTART":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.DTStart = t
-		}
-	case "DUE":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.Due = t
-		}
-	case "COMPLETED":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.Completed = t
-		}
-	case "SUMMARY":
-		p.currentTodo.Summary = value
-	case "DESCRIPTION":
-		p.currentTodo.Description = value
-	case "STATUS":
-		p.currentTodo.Status = value
-	case "PERCENT-COMPLETE":
-		p.currentTodo.PercentComplete = p.parseInt(value)
-	case "PRIORITY":
-		p.currentTodo.Priority = p.parseInt(value)
 	case "CATEGORIES":
 		p.currentTodo.Categories = append(p.currentTodo.Categories, strings.Split(value, ",")...)
-	case "CREATED":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.Created = t
-		}
-	case "LAST-MODIFIED":
-		if t := p.parseTime(value, params); t != nil {
-			p.currentTodo.LastModified = t
-		}
-	case "SEQUENCE":
-		p.currentTodo.Sequence = p.parseInt(value)
-	case "CLASS":
-		p.currentTodo.Class = value
-	case "URL":
-		p.currentTodo.URL = value
 	case "RELATED-TO":
 		p.currentTodo.RelatedTo = append(p.currentTodo.RelatedTo, p.parseRelatedTo(value, params))
 	case "ATTACH":

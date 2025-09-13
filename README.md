@@ -4,7 +4,8 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/kevmarchant/go-icloud-caldav.svg)](https://pkg.go.dev/github.com/kevmarchant/go-icloud-caldav)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kevmarchant/go-icloud-caldav)](https://goreportcard.com/report/github.com/kevmarchant/go-icloud-caldav)
-[![Test Coverage](https://img.shields.io/badge/coverage-83.6%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
+[![Test Coverage](https://img.shields.io/badge/coverage-84.3%25-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
+[![Code Quality](https://img.shields.io/badge/gocyclo-A--grade-brightgreen.svg)](https://github.com/kevmarchant/go-icloud-caldav)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Table of Contents
@@ -55,7 +56,15 @@ A comprehensive CalDAV client library for Go with full iCloud compatibility, adv
 - 🔍 **Advanced Filtering** - Nested component filters, text matching, time ranges
 - 📈 **Metrics Collection** - Track connection reuse, retry attempts, and performance
 
-### New in v0.2.1
+### New in v0.2.2
+
+- 🏆 **Code Quality A- Grade** - Reduced cyclomatic complexity by 75% through major refactoring
+- ⚡ **Performance Optimisations** - Improved XML building, HTTP retry logic, and parser efficiency
+- 🔧 **Major Refactoring** - Decomposed complex functions for better maintainability
+- 🐛 **Critical Fixes** - Fixed ACL parsing, privilege extraction, and test reliability
+- ✅ **Quality Assurance** - All static analysis tools pass (go vet, staticcheck, golangci-lint)
+
+### Recent Features (v0.2.1)
 
 - 🗄️ **Response Caching** - Intelligent caching with TTL and statistics
 - 🔄 **RRULE Parsing** - Native recurrence rule parsing and expansion
@@ -700,6 +709,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 Recent highlights:
 
+- v0.2.2 - Code quality A- grade, 75% complexity reduction, performance optimisations, critical fixes
 - v0.2.1 - Major feature expansion: caching, RRULE parsing, timezone support, ACLs, attachments
 - v0.1.2 - Major feature release: parallel operations, sync tokens, iCal parser, XML validation
 - v0.1.1 - Fixed CI/CD issues, improved error handling

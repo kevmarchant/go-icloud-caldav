@@ -456,18 +456,37 @@ func TestBuildSyncCollectionXML(t *testing.T) {
 	}
 }
 
-func TestSyncAllCalendarsWithWorkers(t *testing.T) {
-	callCount := 0
+func createSyncTestServer() *httptest.Server {
 	var mu sync.Mutex
+	callCount := 0
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
 
-		if r.URL.Path == "/" && r.Method == "PROPFIND" {
-			w.WriteHeader(207)
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		switch {
+		case r.URL.Path == "/" && r.Method == "PROPFIND":
+			handleRootPropfind(w)
+		case r.URL.Path == "/.well-known/caldav":
+			handleWellKnownCalDAV(w)
+		case r.Method == "PROPFIND" && r.URL.Path == "/principals/":
+			handlePrincipalsPropfind(w)
+		case r.Method == "PROPFIND" && r.URL.Path == "/principals/test/":
+			handlePrincipalTestPropfind(w)
+		case r.Method == "PROPFIND" && strings.Contains(r.URL.Path, "/calendars/"):
+			handleCalendarsPropfind(w)
+		case r.Method == "REPORT":
+			handleCalendarReport(w, r.URL.Path)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+}
+
+func handleRootPropfind(w http.ResponseWriter) {
+	w.WriteHeader(207)
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:">
   <D:response>
     <D:href>/</D:href>
@@ -481,18 +500,16 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`))
-			return
-		}
+}
 
-		if r.URL.Path == "/.well-known/caldav" {
-			w.Header().Set("Location", "/principals/")
-			w.WriteHeader(301)
-			return
-		}
+func handleWellKnownCalDAV(w http.ResponseWriter) {
+	w.Header().Set("Location", "/principals/")
+	w.WriteHeader(301)
+}
 
-		if r.Method == "PROPFIND" && r.URL.Path == "/principals/" {
-			w.WriteHeader(207)
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+func handlePrincipalsPropfind(w http.ResponseWriter) {
+	w.WriteHeader(207)
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:">
   <D:response>
     <D:href>/principals/test/</D:href>
@@ -506,12 +523,11 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`))
-			return
-		}
+}
 
-		if r.Method == "PROPFIND" && r.URL.Path == "/principals/test/" {
-			w.WriteHeader(207)
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+func handlePrincipalTestPropfind(w http.ResponseWriter) {
+	w.WriteHeader(207)
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:">
   <D:response>
     <D:href>/principals/test/</D:href>
@@ -525,12 +541,11 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`))
-			return
-		}
+}
 
-		if r.Method == "PROPFIND" && strings.Contains(r.URL.Path, "/calendars/") {
-			w.WriteHeader(207)
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+func handleCalendarsPropfind(w http.ResponseWriter) {
+	w.WriteHeader(207)
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
   <D:response>
     <D:href>/calendars/test/calendar1/</D:href>
@@ -572,21 +587,12 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`))
-			return
-		}
+}
 
-		if r.Method == "REPORT" {
-			calName := "unknown"
-			if strings.Contains(r.URL.Path, "calendar1") {
-				calName = "calendar1"
-			} else if strings.Contains(r.URL.Path, "calendar2") {
-				calName = "calendar2"
-			} else if strings.Contains(r.URL.Path, "calendar3") {
-				calName = "calendar3"
-			}
-
-			w.WriteHeader(207)
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+func handleCalendarReport(w http.ResponseWriter, path string) {
+	calName := extractCalendarName(path)
+	w.WriteHeader(207)
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
   <D:sync-token>` + calName + `-token</D:sync-token>
   <D:response>
@@ -599,45 +605,60 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`))
-			return
+}
+
+func extractCalendarName(path string) string {
+	if strings.Contains(path, "calendar1") {
+		return "calendar1"
+	}
+	if strings.Contains(path, "calendar2") {
+		return "calendar2"
+	}
+	if strings.Contains(path, "calendar3") {
+		return "calendar3"
+	}
+	return "unknown"
+}
+
+func verifySyncResults(t *testing.T, results map[string]*SyncResponse, expectedCount int, expectedCalendars []string) {
+	if len(results) != expectedCount {
+		t.Errorf("Expected %d sync results, got %d", expectedCount, len(results))
+	}
+
+	for _, calHref := range expectedCalendars {
+		syncResp, exists := results[calHref]
+		if !exists {
+			t.Errorf("Missing sync result for calendar %s", calHref)
+			continue
 		}
 
-		w.WriteHeader(404)
-	}))
+		expectedToken := strings.Trim(calHref, "/")
+		expectedToken = expectedToken[strings.LastIndex(expectedToken, "/")+1:] + "-token"
+		if syncResp.SyncToken != expectedToken {
+			t.Errorf("Calendar %s: expected token %s, got %s", calHref, expectedToken, syncResp.SyncToken)
+		}
+	}
+}
+
+func TestSyncAllCalendarsWithWorkers(t *testing.T) {
+	server := createSyncTestServer()
 	defer server.Close()
 
 	client := NewClient("test", "test")
 	client.baseURL = server.URL
+
+	expectedCalendars := []string{
+		"/calendars/test/calendar1/",
+		"/calendars/test/calendar2/",
+		"/calendars/test/calendar3/",
+	}
 
 	t.Run("parallel sync without existing tokens", func(t *testing.T) {
 		results, err := client.SyncAllCalendarsWithWorkers(context.Background(), nil, 3)
 		if err != nil {
 			t.Fatalf("SyncAllCalendarsWithWorkers failed: %v", err)
 		}
-
-		if len(results) != 3 {
-			t.Errorf("Expected 3 sync results, got %d", len(results))
-		}
-
-		expectedCalendars := []string{
-			"/calendars/test/calendar1/",
-			"/calendars/test/calendar2/",
-			"/calendars/test/calendar3/",
-		}
-
-		for _, calHref := range expectedCalendars {
-			syncResp, exists := results[calHref]
-			if !exists {
-				t.Errorf("Missing sync result for calendar %s", calHref)
-				continue
-			}
-
-			expectedToken := strings.Trim(calHref, "/")
-			expectedToken = expectedToken[strings.LastIndex(expectedToken, "/")+1:] + "-token"
-			if syncResp.SyncToken != expectedToken {
-				t.Errorf("Calendar %s: expected token %s, got %s", calHref, expectedToken, syncResp.SyncToken)
-			}
-		}
+		verifySyncResults(t, results, 3, expectedCalendars)
 	})
 
 	t.Run("parallel sync with existing tokens", func(t *testing.T) {
@@ -661,10 +682,7 @@ func TestSyncAllCalendarsWithWorkers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SyncAllCalendarsWithWorkers failed: %v", err)
 		}
-
-		if len(results) != 3 {
-			t.Errorf("Expected 3 sync results, got %d", len(results))
-		}
+		verifySyncResults(t, results, 3, expectedCalendars)
 	})
 }
 

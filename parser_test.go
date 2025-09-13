@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"context"
+	"encoding/xml"
 	"io"
 	"strings"
 	"testing"
@@ -328,8 +329,8 @@ func TestExtractCalendarHomeSetFromResponse(t *testing.T) {
 	}
 }
 
-func TestParseCalendarMetadata(t *testing.T) {
-	responseBody := `<?xml version="1.0" encoding="UTF-8"?>
+func getCalendarMetadataTestResponse() string {
+	return `<?xml version="1.0" encoding="UTF-8"?>
 	<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
 		<d:response>
 			<d:href>/123456789/calendars/home/</d:href>
@@ -381,81 +382,102 @@ func TestParseCalendarMetadata(t *testing.T) {
 			</d:propstat>
 		</d:response>
 	</d:multistatus>`
+}
 
-	resp, err := parseMultiStatusResponse(strings.NewReader(responseBody))
+func verifyCalendarStringProps(t *testing.T, prop *xmlPropData) {
+	expectedStrings := map[string]string{
+		"DisplayName":      "Work Calendar",
+		"CalendarTimeZone": "America/New_York",
+		"MinDateTime":      "19700101T000000Z",
+		"MaxDateTime":      "20381231T235959Z",
+	}
+
+	actualStrings := map[string]string{
+		"DisplayName":      prop.DisplayName,
+		"CalendarTimeZone": prop.CalendarTimeZone,
+		"MinDateTime":      prop.MinDateTime,
+		"MaxDateTime":      prop.MaxDateTime,
+	}
+
+	for field, expected := range expectedStrings {
+		if actual := actualStrings[field]; actual != expected {
+			t.Errorf("expected %s '%s', got '%s'", field, expected, actual)
+		}
+	}
+}
+
+func verifyCalendarIntProps(t *testing.T, prop *xmlPropData) {
+	expectedStrings := map[string]string{
+		"MaxResourceSize":         "1048576",
+		"MaxInstances":            "100",
+		"MaxAttendeesPerInstance": "25",
+		"QuotaUsedBytes":          "512000",
+		"QuotaAvailableBytes":     "536576000",
+	}
+
+	actualStrings := map[string]string{
+		"MaxResourceSize":         prop.MaxResourceSize,
+		"MaxInstances":            prop.MaxInstances,
+		"MaxAttendeesPerInstance": prop.MaxAttendeesPerInstance,
+		"QuotaUsedBytes":          prop.QuotaUsedBytes,
+		"QuotaAvailableBytes":     prop.QuotaAvailableBytes,
+	}
+
+	for field, expected := range expectedStrings {
+		if actual := actualStrings[field]; actual != expected {
+			t.Errorf("expected %s %s, got %s", field, expected, actual)
+		}
+	}
+}
+
+func verifyPrivilegesAndReports(t *testing.T, prop *xmlPropData) {
+	privileges := prop.CurrentUserPrivilegeSet.Privileges
+	expectedPrivileges := 2
+	if len(privileges) != expectedPrivileges {
+		t.Errorf("expected %d privileges, got %d", expectedPrivileges, len(privileges))
+	}
+	if len(privileges) > 0 && privileges[0].Read == nil {
+		t.Errorf("expected first privilege to have Read permission")
+	}
+	if len(privileges) > 1 && privileges[1].Write == nil {
+		t.Errorf("expected second privilege to have Write permission")
+	}
+
+	reports := prop.SupportedReportSet.SupportedReports
+	expectedReports := 2
+	if len(reports) != expectedReports {
+		t.Errorf("expected %d supported reports, got %d", expectedReports, len(reports))
+	}
+	if len(reports) > 0 && reports[0].Report.CalendarQuery == nil {
+		t.Errorf("expected first report to be calendar-query")
+	}
+	if len(reports) > 1 && reports[1].Report.CalendarMultiget == nil {
+		t.Errorf("expected second report to be calendar-multiget")
+	}
+}
+
+func TestParseCalendarMetadata(t *testing.T) {
+	responseBody := getCalendarMetadataTestResponse()
+
+	var xmlResp xmlMultiStatus
+	err := xml.Unmarshal([]byte(responseBody), &xmlResp)
 	if err != nil {
-		t.Fatalf("failed to parse response: %v", err)
+		t.Fatalf("failed to parse XML response: %v", err)
 	}
 
-	if len(resp.Responses) != 1 {
-		t.Fatalf("expected 1 response, got %d", len(resp.Responses))
+	if len(xmlResp.Responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(xmlResp.Responses))
 	}
 
-	if len(resp.Responses[0].Propstat) != 1 {
-		t.Fatalf("expected 1 propstat, got %d", len(resp.Responses[0].Propstat))
+	if len(xmlResp.Responses[0].Propstats) != 1 {
+		t.Fatalf("expected 1 propstat, got %d", len(xmlResp.Responses[0].Propstats))
 	}
 
-	prop := resp.Responses[0].Propstat[0].Prop
+	prop := &xmlResp.Responses[0].Propstats[0].Prop
 
-	// Test basic properties
-	if prop.DisplayName != "Work Calendar" {
-		t.Errorf("expected display name 'Work Calendar', got %s", prop.DisplayName)
-	}
-
-	// Test new metadata properties
-	if prop.CalendarTimeZone != "America/New_York" {
-		t.Errorf("expected calendar timezone 'America/New_York', got %s", prop.CalendarTimeZone)
-	}
-
-	if prop.MaxResourceSize != 1048576 {
-		t.Errorf("expected max resource size 1048576, got %d", prop.MaxResourceSize)
-	}
-
-	if prop.MinDateTime != "19700101T000000Z" {
-		t.Errorf("expected min date time '19700101T000000Z', got %s", prop.MinDateTime)
-	}
-
-	if prop.MaxDateTime != "20381231T235959Z" {
-		t.Errorf("expected max date time '20381231T235959Z', got %s", prop.MaxDateTime)
-	}
-
-	if prop.MaxInstances != 100 {
-		t.Errorf("expected max instances 100, got %d", prop.MaxInstances)
-	}
-
-	if prop.MaxAttendeesPerInstance != 25 {
-		t.Errorf("expected max attendees per instance 25, got %d", prop.MaxAttendeesPerInstance)
-	}
-
-	if len(prop.CurrentUserPrivilegeSet) != 2 {
-		t.Errorf("expected 2 privileges, got %d", len(prop.CurrentUserPrivilegeSet))
-	}
-
-	expectedPrivileges := []string{"read", "write"}
-	for i, expected := range expectedPrivileges {
-		if i >= len(prop.CurrentUserPrivilegeSet) || prop.CurrentUserPrivilegeSet[i] != expected {
-			t.Errorf("expected privilege[%d] to be '%s', got '%s'", i, expected, prop.CurrentUserPrivilegeSet[i])
-		}
-	}
-
-	if len(prop.SupportedReports) != 2 {
-		t.Errorf("expected 2 supported reports, got %d", len(prop.SupportedReports))
-	}
-
-	expectedReports := []string{"calendar-query", "calendar-multiget"}
-	for i, expected := range expectedReports {
-		if i >= len(prop.SupportedReports) || prop.SupportedReports[i] != expected {
-			t.Errorf("expected supported report[%d] to be '%s', got '%s'", i, expected, prop.SupportedReports[i])
-		}
-	}
-
-	if prop.QuotaUsedBytes != 512000 {
-		t.Errorf("expected quota used bytes 512000, got %d", prop.QuotaUsedBytes)
-	}
-
-	if prop.QuotaAvailableBytes != 536576000 {
-		t.Errorf("expected quota available bytes 536576000, got %d", prop.QuotaAvailableBytes)
-	}
+	verifyCalendarStringProps(t, prop)
+	verifyCalendarIntProps(t, prop)
+	verifyPrivilegesAndReports(t, prop)
 }
 
 func TestParseCalendarMetadataExtract(t *testing.T) {

@@ -193,24 +193,23 @@ func formatTimeForCalDAV(t time.Time) string {
 	return t.UTC().Format("20060102T150405Z")
 }
 
-func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
-	estimatedSize := 500 + len(query.Properties)*30
+func calculateQueryXMLSize(query CalendarQuery) int {
+	size := 500 + len(query.Properties)*30
 	if query.Filter.Component != "" {
-		estimatedSize += 200
+		size += 200
 	}
 	if query.TimeRange != nil {
-		estimatedSize += 100
+		size += 100
 	}
+	return size
+}
 
-	builder := NewXMLBuilder(estimatedSize)
+func needsFilter(query CalendarQuery) bool {
+	return query.Filter.Component != "" || query.TimeRange != nil || len(query.Filter.CompFilters) > 0
+}
 
-	builder.WriteHeader().
-		WriteStartElement("C:calendar-query",
-			"xmlns:D", "DAV:",
-			"xmlns:C", "urn:ietf:params:xml:ns:caldav").
-		WriteStartElement("D:prop")
-
-	for _, prop := range query.Properties {
+func writeQueryProperties(builder *XMLBuilder, properties []string) {
+	for _, prop := range properties {
 		switch prop {
 		case "getetag":
 			builder.WriteSelfClosingElement("D:getetag")
@@ -222,35 +221,65 @@ func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
 			}
 		}
 	}
+}
 
+func writeQueryFilter(builder *XMLBuilder, query CalendarQuery) {
+	builder.WriteStartElement("C:filter").
+		WriteStartElement("C:comp-filter", "name", "VCALENDAR")
+
+	writeFilterContent(builder, query.Filter, query.TimeRange)
+
+	builder.WriteEndElement("C:comp-filter").
+		WriteEndElement("C:filter")
+}
+
+func writeFilterContent(builder *XMLBuilder, filter Filter, timeRange *TimeRange) {
+	if filter.Component != "" && filter.Component != "VCALENDAR" {
+		writeComponentFilter(builder, filter)
+	} else if filter.Component == "VCALENDAR" {
+		writeVCalendarFilter(builder, filter)
+	} else if len(filter.CompFilters) > 0 {
+		writeCompFilters(builder, filter.CompFilters)
+	} else if timeRange != nil {
+		writeEventTimeRange(builder, timeRange)
+	}
+}
+
+func writeVCalendarFilter(builder *XMLBuilder, filter Filter) {
+	writePropFilters(builder, filter.Props)
+	if filter.TimeRange != nil {
+		writeTimeRange(builder, filter.TimeRange)
+	}
+	writeCompFilters(builder, filter.CompFilters)
+}
+
+func writeCompFilters(builder *XMLBuilder, compFilters []Filter) {
+	for _, compFilter := range compFilters {
+		writeComponentFilter(builder, compFilter)
+	}
+}
+
+func writeEventTimeRange(builder *XMLBuilder, timeRange *TimeRange) {
+	builder.WriteStartElement("C:comp-filter", "name", "VEVENT")
+	writeTimeRange(builder, timeRange)
+	builder.WriteEndElement("C:comp-filter")
+}
+
+func buildCalendarQueryXML(query CalendarQuery) ([]byte, error) {
+	estimatedSize := calculateQueryXMLSize(query)
+	builder := NewXMLBuilder(estimatedSize)
+
+	builder.WriteHeader().
+		WriteStartElement("C:calendar-query",
+			"xmlns:D", "DAV:",
+			"xmlns:C", "urn:ietf:params:xml:ns:caldav").
+		WriteStartElement("D:prop")
+
+	writeQueryProperties(builder, query.Properties)
 	builder.WriteEndElement("D:prop")
 
-	if query.Filter.Component != "" || query.TimeRange != nil || len(query.Filter.CompFilters) > 0 {
-		builder.WriteStartElement("C:filter").
-			WriteStartElement("C:comp-filter", "name", "VCALENDAR")
-
-		if query.Filter.Component != "" && query.Filter.Component != "VCALENDAR" {
-			writeComponentFilter(builder, query.Filter)
-		} else if query.Filter.Component == "VCALENDAR" {
-			writePropFilters(builder, query.Filter.Props)
-			if query.Filter.TimeRange != nil {
-				writeTimeRange(builder, query.Filter.TimeRange)
-			}
-			for _, compFilter := range query.Filter.CompFilters {
-				writeComponentFilter(builder, compFilter)
-			}
-		} else if len(query.Filter.CompFilters) > 0 {
-			for _, compFilter := range query.Filter.CompFilters {
-				writeComponentFilter(builder, compFilter)
-			}
-		} else if query.TimeRange != nil {
-			builder.WriteStartElement("C:comp-filter", "name", "VEVENT")
-			writeTimeRange(builder, query.TimeRange)
-			builder.WriteEndElement("C:comp-filter")
-		}
-
-		builder.WriteEndElement("C:comp-filter").
-			WriteEndElement("C:filter")
+	if needsFilter(query) {
+		writeQueryFilter(builder, query)
 	}
 
 	builder.WriteEndElement("C:calendar-query")
