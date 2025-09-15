@@ -123,6 +123,8 @@ func (c *CalDAVClient) prepareRequest(ctx context.Context, method, path string, 
 
 	req.Header.Set("Authorization", c.authHeader)
 	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Keep-Alive", "timeout=300, max=100")
 
 	return req, nil
 }

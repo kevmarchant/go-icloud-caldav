@@ -16,20 +16,20 @@ import (
 func TestDefaultConnectionPoolConfig(t *testing.T) {
 	config := DefaultConnectionPoolConfig()
 
-	if config.MaxIdleConns != 100 {
-		t.Errorf("Expected MaxIdleConns to be 100, got %d", config.MaxIdleConns)
+	if config.MaxIdleConns != 200 {
+		t.Errorf("Expected MaxIdleConns to be 200, got %d", config.MaxIdleConns)
 	}
 
-	if config.MaxIdleConnsPerHost != 10 {
-		t.Errorf("Expected MaxIdleConnsPerHost to be 10, got %d", config.MaxIdleConnsPerHost)
+	if config.MaxIdleConnsPerHost != 20 {
+		t.Errorf("Expected MaxIdleConnsPerHost to be 20, got %d", config.MaxIdleConnsPerHost)
 	}
 
-	if config.MaxConnsPerHost != 20 {
-		t.Errorf("Expected MaxConnsPerHost to be 20, got %d", config.MaxConnsPerHost)
+	if config.MaxConnsPerHost != 50 {
+		t.Errorf("Expected MaxConnsPerHost to be 50, got %d", config.MaxConnsPerHost)
 	}
 
-	if config.IdleConnTimeout != 90*time.Second {
-		t.Errorf("Expected IdleConnTimeout to be 90s, got %v", config.IdleConnTimeout)
+	if config.IdleConnTimeout != 300*time.Second {
+		t.Errorf("Expected IdleConnTimeout to be 300s, got %v", config.IdleConnTimeout)
 	}
 
 	if config.DisableKeepAlives {

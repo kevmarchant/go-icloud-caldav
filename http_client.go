@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	defaultMaxIdleConns        = 100
-	defaultMaxIdleConnsPerHost = 10
-	defaultIdleConnTimeout     = 90 * time.Second
+	defaultMaxIdleConns        = 200
+	defaultMaxIdleConnsPerHost = 20
+	defaultIdleConnTimeout     = 300 * time.Second
 	defaultDialTimeout         = 30 * time.Second
-	defaultKeepAlive           = 30 * time.Second
+	defaultKeepAlive           = 300 * time.Second
 	defaultTLSHandshakeTimeout = 10 * time.Second
 )
 

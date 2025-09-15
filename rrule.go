@@ -226,42 +226,95 @@ func processRRuleOccurrences(state *expandEventState, rule *RRule) error {
 		return nil
 	}
 
-	current := *state.event.DTStart
-	instanceCount := 0
-	maxIterations := 10000
-	isFirstOccurrence := true
+	iterator := newRRuleIterator(*state.event.DTStart, rule, state)
 
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		if current.After(state.end) || (rule.Until != nil && current.After(*rule.Until)) {
-			break
-		}
-		if rule.Count > 0 && instanceCount >= rule.Count {
-			break
+	for !iterator.isDone() {
+		if shouldProcessOccurrence(iterator, state, rule) {
+			processSingleOccurrence(iterator.current, state, rule, iterator.isFirstOccurrence)
 		}
 
-		shouldInclude := shouldIncludeMonthlyByDay(current, rule, isFirstOccurrence)
+		iterator.advance(rule)
 
-		if shouldInclude && !current.Before(state.start) && !current.After(state.end) {
-			timesForDay := expandTimeGranularity(current, rule)
-
-			for _, expandedTime := range timesForDay {
-				if rule.Count > 0 && len(state.occurrences) >= rule.Count {
-					break
-				}
-				addOccurrenceIfValid(state, expandedTime)
-			}
-		}
-
-		instanceCount++
-		isFirstOccurrence = false
-		current = nextOccurrence(current, rule)
-
-		if rule.Count > 0 && len(state.occurrences) >= rule.Count {
+		if hasReachedCountLimit(rule, state) {
 			break
 		}
 	}
 
 	return nil
+}
+
+type rruleIterator struct {
+	current           time.Time
+	instanceCount     int
+	isFirstOccurrence bool
+	iteration         int
+	maxIterations     int
+}
+
+func newRRuleIterator(start time.Time, rule *RRule, state *expandEventState) *rruleIterator {
+	return &rruleIterator{
+		current:           start,
+		instanceCount:     0,
+		isFirstOccurrence: true,
+		iteration:         0,
+		maxIterations:     10000,
+	}
+}
+
+func (it *rruleIterator) isDone() bool {
+	return it.iteration >= it.maxIterations
+}
+
+func (it *rruleIterator) advance(rule *RRule) {
+	it.instanceCount++
+	it.isFirstOccurrence = false
+	it.current = nextOccurrence(it.current, rule)
+	it.iteration++
+}
+
+func shouldProcessOccurrence(iterator *rruleIterator, state *expandEventState, rule *RRule) bool {
+	if hasReachedEndCondition(iterator.current, state.end, rule) {
+		return false
+	}
+
+	if hasReachedCountCondition(iterator.instanceCount, rule.Count) {
+		return false
+	}
+
+	return shouldIncludeMonthlyByDay(iterator.current, rule, iterator.isFirstOccurrence)
+}
+
+func hasReachedEndCondition(current, end time.Time, rule *RRule) bool {
+	if current.After(end) {
+		return true
+	}
+	return rule.Until != nil && current.After(*rule.Until)
+}
+
+func hasReachedCountCondition(instanceCount, ruleCount int) bool {
+	return ruleCount > 0 && instanceCount >= ruleCount
+}
+
+func hasReachedCountLimit(rule *RRule, state *expandEventState) bool {
+	return rule.Count > 0 && len(state.occurrences) >= rule.Count
+}
+
+func processSingleOccurrence(current time.Time, state *expandEventState, rule *RRule, isFirst bool) {
+	if !isWithinRange(current, state.start, state.end) {
+		return
+	}
+
+	timesForDay := expandTimeGranularity(current, rule)
+	for _, expandedTime := range timesForDay {
+		if hasReachedCountLimit(rule, state) {
+			break
+		}
+		addOccurrenceIfValid(state, expandedTime)
+	}
+}
+
+func isWithinRange(t, start, end time.Time) bool {
+	return !t.Before(start) && !t.After(end)
 }
 
 func processRDateOccurrences(state *expandEventState) {
@@ -278,6 +331,41 @@ func processRDateOccurrences(state *expandEventState) {
 			addOccurrenceIfValid(state, rdate)
 		}
 	}
+}
+
+// ExpandRRule expands an RRULE into individual occurrences within the time range
+func ExpandRRule(rule *RRule, eventStart *time.Time, start, end time.Time) ([]time.Time, error) {
+	if rule == nil || eventStart == nil {
+		return nil, fmt.Errorf("rule and eventStart are required")
+	}
+
+	var occurrences []time.Time
+	current := *eventStart
+	count := 0
+	maxIterations := 10000
+
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		if rule.Until != nil && current.After(*rule.Until) {
+			break
+		}
+
+		if current.After(end) {
+			break
+		}
+
+		if rule.Count > 0 && count >= rule.Count {
+			break
+		}
+
+		if !current.Before(start) {
+			occurrences = append(occurrences, current)
+			count++
+		}
+
+		current = nextOccurrence(current, rule)
+	}
+
+	return occurrences, nil
 }
 
 // ExpandEvent generates individual event occurrences from a recurring event
@@ -855,48 +943,93 @@ func getNthWeekdayInMonth(year int, month time.Month, weekday time.Weekday, n in
 
 // expandTimeGranularity expands occurrences for BYHOUR, BYMINUTE, BYSECOND
 func expandTimeGranularity(baseTime time.Time, rule *RRule) []time.Time {
-	var times []time.Time
-
-	// If no time-level constraints, return original
-	if len(rule.ByHour) == 0 && len(rule.ByMinute) == 0 && len(rule.BySecond) == 0 {
+	if !hasTimeConstraints(rule) {
 		return []time.Time{baseTime}
 	}
 
-	hours := rule.ByHour
-	if len(hours) == 0 {
-		hours = []int{baseTime.Hour()}
-	}
+	hours := getHourValues(rule.ByHour, baseTime)
+	minutes := getMinuteValues(rule.ByMinute, baseTime)
+	seconds := getSecondValues(rule.BySecond, baseTime)
 
-	minutes := rule.ByMinute
-	if len(minutes) == 0 {
-		minutes = []int{baseTime.Minute()}
-	}
+	return generateTimeOccurrences(baseTime, hours, minutes, seconds)
+}
 
-	seconds := rule.BySecond
-	if len(seconds) == 0 {
-		seconds = []int{baseTime.Second()}
+func hasTimeConstraints(rule *RRule) bool {
+	return len(rule.ByHour) > 0 || len(rule.ByMinute) > 0 || len(rule.BySecond) > 0
+}
+
+func getHourValues(byHour []int, baseTime time.Time) []int {
+	if len(byHour) == 0 {
+		return []int{baseTime.Hour()}
 	}
+	return byHour
+}
+
+func getMinuteValues(byMinute []int, baseTime time.Time) []int {
+	if len(byMinute) == 0 {
+		return []int{baseTime.Minute()}
+	}
+	return byMinute
+}
+
+func getSecondValues(bySecond []int, baseTime time.Time) []int {
+	if len(bySecond) == 0 {
+		return []int{baseTime.Second()}
+	}
+	return bySecond
+}
+
+func generateTimeOccurrences(baseTime time.Time, hours, minutes, seconds []int) []time.Time {
+	var times []time.Time
 
 	for _, h := range hours {
-		if h < 0 || h > 23 {
+		if !isValidHour(h) {
 			continue
 		}
-		for _, m := range minutes {
-			if m < 0 || m > 59 {
-				continue
-			}
-			for _, s := range seconds {
-				if s < 0 || s > 59 {
-					continue
-				}
-				t := time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(),
-					h, m, s, baseTime.Nanosecond(), baseTime.Location())
-				times = append(times, t)
-			}
-		}
+		times = append(times, generateMinuteOccurrences(baseTime, h, minutes, seconds)...)
 	}
 
 	return times
+}
+
+func generateMinuteOccurrences(baseTime time.Time, hour int, minutes, seconds []int) []time.Time {
+	var times []time.Time
+
+	for _, m := range minutes {
+		if !isValidMinute(m) {
+			continue
+		}
+		times = append(times, generateSecondOccurrences(baseTime, hour, m, seconds)...)
+	}
+
+	return times
+}
+
+func generateSecondOccurrences(baseTime time.Time, hour, minute int, seconds []int) []time.Time {
+	var times []time.Time
+
+	for _, s := range seconds {
+		if !isValidSecond(s) {
+			continue
+		}
+		t := time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(),
+			hour, minute, s, baseTime.Nanosecond(), baseTime.Location())
+		times = append(times, t)
+	}
+
+	return times
+}
+
+func isValidHour(h int) bool {
+	return h >= 0 && h <= 23
+}
+
+func isValidMinute(m int) bool {
+	return m >= 0 && m <= 59
+}
+
+func isValidSecond(s int) bool {
+	return s >= 0 && s <= 59
 }
 
 // applyBySetPos filters a set of occurrences according to BYSETPOS

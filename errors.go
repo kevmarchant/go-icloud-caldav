@@ -32,22 +32,26 @@ const (
 )
 
 var (
-	ErrAuthentication     = errors.New("authentication failed")
-	ErrNotFound           = errors.New("resource not found")
-	ErrPreconditionFailed = errors.New("precondition failed")
-	ErrInvalidResponse    = errors.New("invalid server response")
-	ErrTimeout            = errors.New("request timeout")
-	ErrCanceled           = errors.New("request canceled")
-	ErrInvalidXML         = errors.New("invalid XML")
-	ErrNoCalendars        = errors.New("no calendars found")
-	ErrInvalidTimeRange   = errors.New("invalid time range")
-	ErrNetwork            = errors.New("network error")
-	ErrRateLimit          = errors.New("rate limit exceeded")
-	ErrServerError        = errors.New("server error")
-	ErrInvalidRequest     = errors.New("invalid request")
-	ErrPermission         = errors.New("permission denied")
-	ErrConflict           = errors.New("resource conflict")
-	ErrValidation         = errors.New("validation failed")
+	ErrAuthentication        = errors.New("authentication failed")
+	ErrNotFound              = errors.New("resource not found")
+	ErrPreconditionFailed    = errors.New("precondition failed")
+	ErrInvalidResponse       = errors.New("invalid server response")
+	ErrTimeout               = errors.New("request timeout")
+	ErrCanceled              = errors.New("request canceled")
+	ErrInvalidXML            = errors.New("invalid XML")
+	ErrNoCalendars           = errors.New("no calendars found")
+	ErrInvalidTimeRange      = errors.New("invalid time range")
+	ErrNetwork               = errors.New("network error")
+	ErrRateLimit             = errors.New("rate limit exceeded")
+	ErrServerError           = errors.New("server error")
+	ErrInvalidRequest        = errors.New("invalid request")
+	ErrPermission            = errors.New("permission denied")
+	ErrConflict              = errors.New("resource conflict")
+	ErrValidation            = errors.New("validation failed")
+	ErrCalendarAlreadyExists = errors.New("calendar already exists")
+	ErrCalendarNotFound      = errors.New("calendar not found")
+	ErrUnauthorized          = errors.New("unauthorized")
+	ErrForbidden             = errors.New("forbidden")
 )
 
 type CalDAVError struct {
@@ -374,4 +378,34 @@ func GetErrorContext(err error) map[string]interface{} {
 		return calErr.Context
 	}
 	return nil
+}
+
+// EventExistsError indicates an event with the same UID already exists.
+type EventExistsError struct {
+	UID string
+}
+
+func (e *EventExistsError) Error() string {
+	return fmt.Sprintf("event with UID %s already exists", e.UID)
+}
+
+// EventNotFoundError indicates an event was not found.
+type EventNotFoundError struct {
+	UID string
+}
+
+func (e *EventNotFoundError) Error() string {
+	return fmt.Sprintf("event with UID %s not found", e.UID)
+}
+
+// ETagMismatchError indicates an ETag precondition failed.
+type ETagMismatchError struct {
+	Expected string
+}
+
+func (e *ETagMismatchError) Error() string {
+	if e.Expected != "" {
+		return fmt.Sprintf("ETag mismatch: expected %s", e.Expected)
+	}
+	return "ETag mismatch: resource has been modified"
 }

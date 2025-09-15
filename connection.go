@@ -28,15 +28,15 @@ type ConnectionPoolConfig struct {
 // DefaultConnectionPoolConfig returns sensible defaults for connection pooling.
 func DefaultConnectionPoolConfig() *ConnectionPoolConfig {
 	return &ConnectionPoolConfig{
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		MaxConnsPerHost:       20,
-		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          200,               // Increased for better connection reuse
+		MaxIdleConnsPerHost:   20,                // Increased for CalDAV servers
+		MaxConnsPerHost:       50,                // Increased for parallel operations
+		IdleConnTimeout:       300 * time.Second, // 5 minutes for long-lived connections
 		DisableKeepAlives:     false,
 		DisableCompression:    false,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second, // Increased for large responses
 		DisableHTTP2:          false,
 	}
 }
@@ -73,13 +73,23 @@ type ConnectionMetrics struct {
 	SuccessfulRetries int64
 	ConnectionReuses  int64
 	ConnectionCreates int64
+	// Performance metrics
+	TotalRequests       int64
+	TotalResponseTime   time.Duration
+	FastestResponseTime time.Duration
+	SlowestResponseTime time.Duration
+	BytesReceived       int64
+	BytesSent           int64
+	// HTTP/2 metrics
+	HTTP2Connections int64
+	HTTP1Connections int64
 }
 
 // createTransport creates an HTTP transport with the given configuration.
 func createTransport(config *ConnectionPoolConfig) *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
+		KeepAlive: 300 * time.Second, // 5 minutes to match IdleConnTimeout
 	}
 
 	transport := &http.Transport{
@@ -283,9 +293,15 @@ func (it *instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, e
 	if it.metrics != nil {
 		it.metrics.TotalConnections++
 		it.metrics.ActiveConnections++
+		it.metrics.TotalRequests++
 		defer func() {
 			it.metrics.ActiveConnections--
 		}()
+
+		// Track request size if body is available
+		if req.Body != nil && req.ContentLength > 0 {
+			it.metrics.BytesSent += req.ContentLength
+		}
 	}
 
 	start := time.Now()
@@ -302,11 +318,70 @@ func (it *instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, e
 
 	it.logger.Debug("Request completed in %v with status %d", duration, resp.StatusCode)
 
-	if resp.Header.Get("Connection") == "keep-alive" && it.metrics != nil {
-		it.metrics.ConnectionReuses++
-	} else if it.metrics != nil {
-		it.metrics.ConnectionCreates++
+	if it.metrics != nil {
+		// Track response time
+		it.metrics.TotalResponseTime += duration
+		if it.metrics.FastestResponseTime == 0 || duration < it.metrics.FastestResponseTime {
+			it.metrics.FastestResponseTime = duration
+		}
+		if duration > it.metrics.SlowestResponseTime {
+			it.metrics.SlowestResponseTime = duration
+		}
+
+		// Track response size
+		if resp.ContentLength > 0 {
+			it.metrics.BytesReceived += resp.ContentLength
+		}
+
+		// Track connection reuse
+		if resp.Header.Get("Connection") == "keep-alive" || resp.Header.Get("Connection") == "" {
+			it.metrics.ConnectionReuses++
+		} else {
+			it.metrics.ConnectionCreates++
+		}
+
+		// Track HTTP version
+		if resp.ProtoMajor == 2 {
+			it.metrics.HTTP2Connections++
+		} else {
+			it.metrics.HTTP1Connections++
+		}
 	}
 
 	return resp, nil
+}
+
+// GetAverageResponseTime returns the average response time for all requests.
+func (m *ConnectionMetrics) GetAverageResponseTime() time.Duration {
+	if m.TotalRequests == 0 {
+		return 0
+	}
+	return m.TotalResponseTime / time.Duration(m.TotalRequests)
+}
+
+// GetConnectionReuseRate returns the percentage of connections that were reused.
+func (m *ConnectionMetrics) GetConnectionReuseRate() float64 {
+	total := m.ConnectionReuses + m.ConnectionCreates
+	if total == 0 {
+		return 0
+	}
+	return float64(m.ConnectionReuses) / float64(total) * 100
+}
+
+// GetHTTP2UsageRate returns the percentage of connections using HTTP/2.
+func (m *ConnectionMetrics) GetHTTP2UsageRate() float64 {
+	total := m.HTTP2Connections + m.HTTP1Connections
+	if total == 0 {
+		return 0
+	}
+	return float64(m.HTTP2Connections) / float64(total) * 100
+}
+
+// GetSuccessRate returns the success rate of all requests.
+func (m *ConnectionMetrics) GetSuccessRate() float64 {
+	if m.TotalRequests == 0 {
+		return 0
+	}
+	successful := m.TotalRequests - m.FailedConnections
+	return float64(successful) / float64(m.TotalRequests) * 100
 }

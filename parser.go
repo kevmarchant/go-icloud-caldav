@@ -424,6 +424,9 @@ func parseCalendarLine(obj *CalendarObject, line string) {
 		"LOCATION:":    &obj.Location,
 		"STATUS:":      &obj.Status,
 		"ORGANIZER:":   &obj.Organizer,
+		"RRULE:":       &obj.RecurrenceRule,
+		"CLASS:":       &obj.Class,
+		"TRANSP:":      &obj.Transparency,
 	}
 
 	for prefix, field := range simpleFields {

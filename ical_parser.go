@@ -293,23 +293,49 @@ func (p *icalParser) handleProperty(property, value string, params map[string]st
 }
 
 func (p *icalParser) handleEventProperty(property, value string, params map[string]string) {
+	if p.handleStringProperties(property, value) {
+		return
+	}
+	if p.handleTimeProperties(property, value, params) {
+		return
+	}
+	if p.handleListProperties(property, value, params) {
+		return
+	}
+	if p.handleSpecialProperties(property, value, params) {
+		return
+	}
+	p.currentEvent.CustomProperties[property] = value
+}
+
+func (p *icalParser) handleStringProperties(property, value string) bool {
+	stringProps := []string{"UID", "DURATION", "SUMMARY", "LOCATION", "STATUS", "TRANSP", "CLASS", "URL", "RRULE", "EXRULE"}
+	for _, prop := range stringProps {
+		if property == prop {
+			p.setEventStringProperty(property, value)
+			return true
+		}
+	}
+	return false
+}
+
+func (p *icalParser) handleTimeProperties(property, value string, params map[string]string) bool {
+	timeProps := []string{"DTSTAMP", "DTSTART", "DTEND", "RECURRENCE-ID", "CREATED", "LAST-MODIFIED"}
+	for _, prop := range timeProps {
+		if property == prop {
+			p.setEventTimeProperty(property, value, params)
+			return true
+		}
+	}
+	return false
+}
+
+func (p *icalParser) handleListProperties(property, value string, params map[string]string) bool {
 	switch property {
-	case "UID", "DURATION", "SUMMARY", "LOCATION", "STATUS", "TRANSP", "CLASS", "URL", "RRULE", "EXRULE":
-		p.setEventStringProperty(property, value)
-	case "DTSTAMP", "DTSTART", "DTEND", "RECURRENCE-ID", "CREATED", "LAST-MODIFIED":
-		p.setEventTimeProperty(property, value, params)
-	case "DESCRIPTION":
-		p.appendEventDescription(value)
 	case "CATEGORIES":
 		p.currentEvent.Categories = append(p.currentEvent.Categories, strings.Split(value, ",")...)
-	case "ORGANIZER":
-		p.currentEvent.Organizer = p.parseOrganizer(value, params)
 	case "ATTENDEE":
 		p.currentEvent.Attendees = append(p.currentEvent.Attendees, p.parseAttendee(value, params))
-	case "RDATE":
-		p.parseRDates(value, params)
-	case "EXDATE":
-		p.parseEXDates(value, params)
 	case "RELATED-TO":
 		p.currentEvent.RelatedTo = append(p.currentEvent.RelatedTo, p.parseRelatedTo(value, params))
 	case "ATTACH":
@@ -320,13 +346,30 @@ func (p *icalParser) handleEventProperty(property, value string, params map[stri
 		p.currentEvent.Comments = append(p.currentEvent.Comments, value)
 	case "REQUEST-STATUS":
 		p.currentEvent.RequestStatus = append(p.currentEvent.RequestStatus, p.parseRequestStatus(value))
+	default:
+		return false
+	}
+	return true
+}
+
+func (p *icalParser) handleSpecialProperties(property, value string, params map[string]string) bool {
+	switch property {
+	case "DESCRIPTION":
+		p.appendEventDescription(value)
+	case "ORGANIZER":
+		p.currentEvent.Organizer = p.parseOrganizer(value, params)
+	case "RDATE":
+		p.parseRDates(value, params)
+	case "EXDATE":
+		p.parseEXDates(value, params)
 	case "SEQUENCE", "PRIORITY":
 		p.setEventIntProperty(property, value)
 	case "GEO":
 		p.currentEvent.GeoLocation = p.parseGeo(value)
 	default:
-		p.currentEvent.CustomProperties[property] = value
+		return false
 	}
+	return true
 }
 
 func (p *icalParser) setEventStringProperty(property, value string) {

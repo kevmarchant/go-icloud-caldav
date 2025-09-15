@@ -760,6 +760,19 @@ func (c *CalDAVClient) buildSyncRequest(syncToken string) string {
 }
 
 func (c *CalDAVClient) parseDeltaSyncResponse(body []byte, oldState *DeltaSyncState) (*DeltaSyncState, error) {
+	newState := initializeDeltaSyncState(oldState)
+	bodyStr := string(body)
+
+	responses := strings.Split(bodyStr, "<response>")
+	for _, resp := range responses[1:] {
+		processDeltaSyncResponseItem(resp, newState)
+	}
+
+	extractSyncToken(bodyStr, newState)
+	return newState, nil
+}
+
+func initializeDeltaSyncState(oldState *DeltaSyncState) *DeltaSyncState {
 	newState := &DeltaSyncState{
 		Resources:      make(map[string]*DeltaResource),
 		PendingDeletes: []string{},
@@ -771,57 +784,61 @@ func (c *CalDAVClient) parseDeltaSyncResponse(body []byte, oldState *DeltaSyncSt
 		}
 	}
 
-	bodyStr := string(body)
+	return newState
+}
 
-	responses := strings.Split(bodyStr, "<response>")
-	for _, resp := range responses[1:] {
-		var href string
-		var etag string
-		var status int
+func processDeltaSyncResponseItem(resp string, state *DeltaSyncState) {
+	href := extractXMLValue(resp, "<href>", "</href>")
+	status := extractHTTPStatus(resp)
 
-		if hrefStart := strings.Index(resp, "<href>"); hrefStart != -1 {
-			hrefEnd := strings.Index(resp[hrefStart:], "</href>")
-			if hrefEnd != -1 {
-				href = resp[hrefStart+6 : hrefStart+hrefEnd]
-			}
-		}
+	if status == 200 {
+		handleSuccessfulDeltaItem(resp, href, state)
+	} else if status == 404 && href != "" {
+		handleDeletedDeltaItem(href, state)
+	}
+}
 
-		if statusStart := strings.Index(resp, "HTTP/1.1 "); statusStart != -1 {
-			statusEnd := statusStart + 9
-			if statusEnd+3 <= len(resp) {
-				statusCode := resp[statusEnd : statusEnd+3]
-				status, _ = strconv.Atoi(statusCode)
-			}
-		}
-
-		if status == 200 {
-			if etagStart := strings.Index(resp, "<getetag>"); etagStart != -1 {
-				etagEnd := strings.Index(resp[etagStart:], "</getetag>")
-				if etagEnd != -1 {
-					etag = resp[etagStart+9 : etagStart+etagEnd]
-				}
-			}
-
-			if href != "" {
-				newState.Resources[href] = &DeltaResource{
-					Href: href,
-					ETag: etag,
-				}
-			}
-		} else if status == 404 && href != "" {
-			delete(newState.Resources, href)
-			newState.PendingDeletes = append(newState.PendingDeletes, href)
+func extractXMLValue(content, startTag, endTag string) string {
+	if start := strings.Index(content, startTag); start != -1 {
+		end := strings.Index(content[start:], endTag)
+		if end != -1 {
+			return content[start+len(startTag) : start+end]
 		}
 	}
+	return ""
+}
 
-	if tokenStart := strings.Index(bodyStr, "<sync-token>"); tokenStart != -1 {
-		tokenEnd := strings.Index(bodyStr[tokenStart:], "</sync-token>")
-		if tokenEnd != -1 {
-			newState.SyncToken = bodyStr[tokenStart+12 : tokenStart+tokenEnd]
+func extractHTTPStatus(resp string) int {
+	if statusStart := strings.Index(resp, "HTTP/1.1 "); statusStart != -1 {
+		statusEnd := statusStart + 9
+		if statusEnd+3 <= len(resp) {
+			statusCode := resp[statusEnd : statusEnd+3]
+			status, _ := strconv.Atoi(statusCode)
+			return status
 		}
 	}
+	return 0
+}
 
-	return newState, nil
+func handleSuccessfulDeltaItem(resp, href string, state *DeltaSyncState) {
+	if href == "" {
+		return
+	}
+
+	etag := extractXMLValue(resp, "<getetag>", "</getetag>")
+	state.Resources[href] = &DeltaResource{
+		Href: href,
+		ETag: etag,
+	}
+}
+
+func handleDeletedDeltaItem(href string, state *DeltaSyncState) {
+	delete(state.Resources, href)
+	state.PendingDeletes = append(state.PendingDeletes, href)
+}
+
+func extractSyncToken(bodyStr string, state *DeltaSyncState) {
+	state.SyncToken = extractXMLValue(bodyStr, "<sync-token>", "</sync-token>")
 }
 
 func (c *CalDAVClient) GetDeltaResources(calendarPath string) (map[string]*DeltaResource, error) {

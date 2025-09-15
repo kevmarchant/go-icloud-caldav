@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-09-15
+
+### Added
+
+- **Complete CRUD Operations Support**
+  - `CreateEvent` - Create new calendar events with proper iCloud formatting
+  - `UpdateEvent` - Update existing events with ETag validation and conflict detection
+  - `DeleteEvent` - Delete events with proper HTTP method handling
+  - `CreateCalendar` - Create new calendars with full metadata support
+  - `DeleteCalendar` - Delete calendars with confirmation requirements
+  - `CreateTodo` - Create todo items with due dates and priorities
+  - `UpdateTodo` - Update existing todos with completion tracking
+  - `DeleteTodo` - Delete todo items with proper cleanup
+
+- **Advanced Calendar Management**
+  - Calendar metadata caching with intelligent TTL and statistics
+  - Batch CRUD operations for high-performance bulk updates
+  - Alarm CRUD operations with comprehensive reminder support
+  - Event attachment handling with MIME type support
+
+- **Enhanced Recurring Events Support**
+  - Complete RRULE expansion with all frequency types
+  - EXDATE and EXRULE exception handling
+  - Recurring event instance modification
+  - Duration parser for event timing calculations
+
+- **Performance and Quality Improvements**
+  - Connection pool optimisations with increased limits (200 max idle, 50 per host)
+  - Enhanced connection metrics with response time tracking and HTTP/2 usage stats
+  - Connection keep-alive extended to 300 seconds for better reuse
+  - Request/response size tracking for bandwidth monitoring
+
+- **Development Infrastructure**
+  - Comprehensive integration benchmarks for real-world performance testing
+  - New example patterns in `examples/sync-patterns/` directory
+  - Utility functions for common operations and data validation
+  - Claude AI development context and task management system
+
+### Changed
+
+- **Improved Connection Management**
+  - Default connection pool limits increased significantly for better performance
+  - Extended keep-alive timeouts for long-lived connections
+  - Enhanced connection reuse tracking and HTTP protocol version metrics
+  - Better error handling for connection failures and timeouts
+
+- **Enhanced Error System**
+  - Added specific error types for CRUD operations (`EventExistsError`, `EventNotFoundError`, `ETagMismatchError`)
+  - Extended base error types for calendar and authorization failures
+  - Improved error context and debugging information
+
+- **Code Quality Improvements**
+  - Further reduced cyclomatic complexity through function decomposition
+  - Enhanced parser performance with specialized property handling methods
+  - Better separation of concerns in iCal parsing logic
+  - Improved test coverage and reliability
+
+### Fixed
+
+- Fixed connection header handling for keep-alive support
+- Improved XML namespace handling in complex queries
+- Better handling of iCloud-specific response formats
+- Enhanced error propagation in batch operations
+
+### Performance
+
+- Connection reuse rate improved significantly with extended timeouts
+- HTTP/2 usage tracking for protocol optimisation
+- Response time metrics for performance monitoring
+- Bandwidth usage tracking for network optimisation
+
+### Development
+
+- Maintained 82.4% test coverage across expanded codebase
+- Enhanced development workflows with quality checks
+- Improved documentation with UK English consistency
+- Better integration test patterns for CRUD operations
+
 ## [0.2.3] - 2025-09-13
 
 ### Fixed

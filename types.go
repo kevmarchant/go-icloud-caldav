@@ -279,22 +279,32 @@ type Calendar struct {
 }
 
 type CalendarObject struct {
-	Href         string
-	ETag         string
-	CalendarData string
-	UID          string
-	Summary      string
-	Description  string
-	Location     string
-	StartTime    *time.Time
-	EndTime      *time.Time
-	Organizer    string
-	Attendees    []string
-	Status       string
-	Created      *time.Time
-	LastModified *time.Time
-	ParsedData   *ParsedCalendarData
-	ParseError   error
+	Href             string
+	ETag             string
+	CalendarData     string
+	UID              string
+	Summary          string
+	Description      string
+	Location         string
+	StartTime        *time.Time
+	EndTime          *time.Time
+	Organizer        string
+	Attendees        []string
+	Status           string
+	Created          *time.Time
+	LastModified     *time.Time
+	RecurrenceRule   string
+	RecurrenceID     *time.Time
+	ExceptionDates   []time.Time
+	RecurrenceDates  []time.Time
+	Categories       []string
+	Class            string
+	Priority         int
+	Transparency     string
+	URL              string
+	CustomProperties map[string]string
+	ParsedData       *ParsedCalendarData
+	ParseError       error
 }
 
 type CalendarQuery struct {
